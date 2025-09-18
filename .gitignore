@@ -5,3 +5,7 @@
 # we're not uploading the raw data
 
 rawdata/
+
+# ignore DS_Storefiles
+
+DS_Store
