@@ -1,0 +1,7 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+# we're not uploading the raw data
+
+rawdata/
