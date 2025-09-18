@@ -8,4 +8,4 @@ rawdata/
 
 # ignore DS_Storefiles
 
-DS_Store
+.DS_Store
