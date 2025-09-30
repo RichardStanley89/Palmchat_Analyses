@@ -24,3 +24,181 @@ You can add options to executable code like this
 ```
 
 The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+
+
+library("tidyverse")
+library("dplyr")
+library("asnipe")
+library("igraph")
+library("statnet")
+
+
+rawdata <- read.csv("../rawdata/PalmchatBandingDataAll.csv")
+
+edges <- read.csv("../rawdata/PalmchatDyads.csv")
+
+
+# filter out sightings with ID uncertainty:
+
+edges <- edges %>% filter(!str_detect(edges$Individual1, "\\?"))
+edges <-  edges %>% filter(!str_detect(edges$Individual2, "\\?"))
+
+
+# filter out sightings with unbanded individuals that cannot be identified:
+
+edges <- edges %>% filter(!str_detect(edges$Individual1, "U"))
+edges <- edges %>% filter(!str_detect(edges$Individual2, "U"))
+
+
+# let's take a look at the attributes associated with each bird, in the raw banding data:
+
+# let's collapse this data down so that we get rid of repeat individuals in the data (recaptures),
+# so we have one row of attributes for each individual
+
+attributes <- rawdata %>% distinct(Colors, .keep_all = TRUE)
+
+# let's get rid of the columns we're not interested in, just to make things tidier:
+
+attributes <- attributes %>% select(Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing,
+                                    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.)
+
+
+# first, we want to fix some things in the edge list. We want to make sure that 
+# order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction,
+# should always be in the same order to avoid confusion).
+
+# Here, I will create a "dyadID," which gives each dyad the same name,
+# regardless of the order. This is solely for the purpose of fixing the above issue:
+
+
+edges$dyad_id <- apply(edges[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
+
+edges$dyad_id
+
+dyads<- data.frame(edges$dyad_id)
+
+# calculate edge weights by aggregating. This will collapse the repeat network
+# ties, and add a column that represent the number of repeats (edge weight):
+
+edges_with_weights <- aggregate(list(weight=rep(1,nrow(dyads))), dyads, FUN=sum)
+
+# separate the dyads into separate columns again so we have an edge list,
+# just like we started with:
+
+edges <- edges_with_weights  %>% separate_wider_delim(edges.dyad_id, "_", names = c("col1","col2"))
+
+# create a network object in statnet
+
+network <- network(edges,matrix.type="edgelist", directed=FALSE)
+
+list.edge.attributes(network)
+as.edgelist(network)
+get.edge.attribute(network, "weight")
+list.vertex.attributes(network)
+
+# 
+
+### Now we need to add some other node attribute data to the network: eg. the Nest
+# affiliation of each bird in the network, body mass, etc. However, the order
+# of the data in the attributes data set differs from the order in the network.
+# Let's work on this issue so we have a properly labeled network:
+
+# line up vertex attributes in the same order as the network vertex data in statnet:
+
+# let's double check what the order is in the network:
+get.vertex.attribute(network,"vertex.names")
+
+# first, create a column with the same names in each dataset so you can perform a join:
+
+
+df <- mutate(attributes, col1 = Colors)
+df2 <- data.frame(col1 = network.vertex.names(network))
+
+
+# now, perform a join to get them in the right order.
+# As a result of this, the attributes will now be in the same
+# order as the nodes in the network:
+
+dfjoined <- left_join(df2, df, by ="col1")
+
+str(dfjoined$Nest_affiliation..2024.)
+length(dfjoined$Nest_affiliation..2024.)
+
+# now, add these node attributes to the statnet network.
+
+# First, add the attribute "NestID"
+
+set.vertex.attribute(network, "NestID", dfjoined$Nest_affiliation..2024.)
+
+get.vertex.attribute(network,"NestID")
+
+# assess the length and number of NAs in the new network attribute, NestID
+
+sum(is.na(dfjoined$Nest_affiliation..2024.))
+length(dfjoined$Nest_affiliation..2024.)
+network.size(network)
+
+# add the attribute "EntranceID"
+
+set.vertex.attribute(network,"EntranceID", dfjoined$Entrance_affiliation_based_on_videos_2024)
+
+get.vertex.attribute(network,"EntranceID")
+
+list.vertex.attributes(network)
+list.edge.attributes(network)
+
+vertexnames <- get.vertex.attribute(network,"vertex.names")
+vertexnames
+
+
+# add the attribute "Sex"
+
+set.vertex.attribute(network,"Sex", dfjoined$Molecular_Sex)
+
+get.vertex.attribute(network,"Sex")
+
+
+
+```
+
+```{r}
+# let's also load the data in group format, as a list (since this is the input
+# preferred by the "asnipe" package, and it preserves information about group interactions)
+
+
+groupdata <- read.csv("../rawdata/PalmchatGroups.csv")
+
+# let's filter out sightings with ID uncertainty:
+
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual1, "\\?"))
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual2, "\\?"))
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual3, "\\?"))
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual4, "\\?"))
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual5, "\\?"))
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual6, "\\?"))
+
+# and sightings with unbanded birds
+
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual1, "U"))
+groupdata <-  groupdata %>% filter(!str_detect(groupdata$Individual2, "U"))
+
+
+# now let's put this data into a list format for the asnipe package:
+
+
+groups <- groupdata %>% select(Individual1, Individual2, Individual3, Individual4,
+                               Individual5, Individual6, Individual7, Individual8)
+
+groups <- apply(groups, 1, as.list)
+
+print(groups)
+
+# and let's use this function from the asnipe package to create a matrix:
+
+GBI <- get_group_by_individual(groups,
+                               data_format="groups")
+
+GBI
+```
