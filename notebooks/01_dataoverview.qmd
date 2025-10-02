@@ -118,19 +118,26 @@ attributes_clean <- attributes %>%
 ```
 
 # Fix edge list for consistency in the order
-We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion)
+We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. 
 
 ```{r}
 
 # Here, I will create a "dyadID," which gives each dyad the same name,
 # regardless of the order. This is solely for the purpose of fixing the above issue:
 
+clean_edges$dyad_id <- apply(clean_edges[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
 
-edges$dyad_id <- apply(edges[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
-
-edges$dyad_id
+clean_edges$dyad_id
 
 dyads<- data.frame(edges$dyad_id)
+
+```
+
+
+
+```{r}
+
+
 
 # calculate edge weights by aggregating. This will collapse the repeat network
 # ties, and add a column that represent the number of repeats (edge weight):
