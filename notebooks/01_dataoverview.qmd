@@ -77,18 +77,35 @@ clean_edges <- edges %>%
 ```
 
 
+Let's take a look at the attributes associated with each bird, in the raw banding data:
+Clean out the recaptures first
 ```{r}
-# filter out sightings with ID uncertainty:
-edges <- edges %>% filter(!str_detect(edges$Individual1, "\\?"))
-edges <-  edges %>% filter(!str_detect(edges$Individual2, "\\?"))
+# There is an error in the banding process here
+# These are new captures but accidentally got the same color combination as a previous new bird
+
+rawdata %>% 
+  filter(Status == "N") %>% 
+  anti_join(
+    rawdata %>% distinct(Colors, .keep_all = TRUE) 
+  )
+
+```
+These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site.
+```{r}
+rawdata %>% 
+  filter(Colors %in% c("GBBM", "RBBM"), Status == "N") %>% 
+  select(Location, Colors)
+```
+Based on this, we create the attribute table to keep the repeat birds since they are from different locations. 
+
+```{r}
+attributes <- rawdata %>% 
+  filter(Status == "N")
+```
 
 
-# filter out sightings with unbanded individuals that cannot be identified:
-edges <- edges %>% filter(!str_detect(edges$Individual1, "U"))
-edges <- edges %>% filter(!str_detect(edges$Individual2, "U"))
 
-
-# let's take a look at the attributes associated with each bird, in the raw banding data:
+```{r}
 
 # let's collapse this data down so that we get rid of repeat individuals in the data (recaptures),
 # so we have one row of attributes for each individual
