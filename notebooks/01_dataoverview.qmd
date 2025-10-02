@@ -36,7 +36,8 @@ glimpse(edges)
 First we want to filter out the dyads with unbanded birds:
 ```{r}
 unbanded <- edges %>% 
-  filter(Individual1 == "U" | Individual2 == "U")
+  filter(str_detect(Individual1, "U") | str_detect(Individual2, "U") |
+         str_detect(Individual1, "juv") | str_detect(Individual2, "juv"))
 
 slice_head(unbanded, n=10)  
 
@@ -57,24 +58,43 @@ uncertain_id <- edges %>%
 ```
 
 
-
-```{r}
-
-juv_unbanded <- edges %>% 
-  filter(str_detect(Individual1, "juv") | str_detect(Individual2, "juv"))
-  
-```
-
-
 Now we can get the clean_edges by removing the unbaded, uncertain id and juveniles unbanded
 
 ```{r clean_edges, message=FALSE}
 
 clean_edges <- edges %>% 
   anti_join(unbanded) %>% 
-  anti_join(uncertain_id) %>% 
-  anti_join(juv_unbanded)
+  anti_join(uncertain_id)
 ```
+
+
+## Fix Bands
+
+```{r}
+# Create vectors for In1, and 2
+# match and keep only distinct ones
+# Identify characters that are not valid (-), or missing
+
+# The correct 
+# They should all be following 4 letters
+
+band_ids <- unique(c(clean_edges$Individual1, clean_edges$Individual2))
+
+
+tibble(band_ids = band_ids) %>% 
+  mutate(band1 = str_trim(band_ids)) %>% 
+  # mutate(match_ = match(band_ids, band1)) # WANT TO get a true false
+  filter(str_detect(band_ids, "-"))
+
+# we need to identify which/match which ones they could be.
+# match by placement
+
+#W-WM this one is a true id because they ran out of bands
+
+# isolate the ones that have only 3 or 2
+```
+
+
 
 
 Let's take a look at the attributes associated with each bird, in the raw banding data:
@@ -116,6 +136,9 @@ attributes_clean <- attributes %>%
   janitor::clean_names()
 
 ```
+
+
+
 
 # Fix edge list for consistency in the order
 We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. 
