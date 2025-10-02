@@ -4,50 +4,86 @@ format: html
 editor: visual
 ---
 
-## Quarto
+# Introduction
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+## Palmchat Banding Data:
 
-## Running Code
+The Palmchat Banding Data spreadsheet contains data on the individual birds that were captured, banded, and released at my field site in Punta Cana in the Dominican Republic. This spreadsheet is for keeping track of the identity of individual birds (which have unique numbers and band color combinations), as well as the characteristics of each bird (eg. body size, male or female, age where known, and other morphological characteristics). Because many different field assistants contributed to collecting this data, there are some differences in how the data were collected over different time periods (eg. Sometimes it was possible to age birds in the field based on molt patterns, but not every observer could do this, and sometimes their age scoring systems were slightly different)
 
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
-```{r}
-1 + 1
-```
-
-You can add options to executable code like this
-
-```{r}
-#| echo: false
-2 * 2
-```
-
-The `echo: false` option disables the printing of code (only output is displayed).
-
-```{r}
-
-
+```{r setup, message=FALSE}
+# Load the libraries
 library("tidyverse")
 library("dplyr")
 library("asnipe")
 library("igraph")
 library("statnet")
 
+```
 
+We are loading the three datasets here, and taking a quick look. The `Dyads` data is the sightings
+
+```{r load_data}
 rawdata <- read.csv("../rawdata/PalmchatBandingDataAll.csv")
-
+glimpse(rawdata)
 edges <- read.csv("../rawdata/PalmchatDyads.csv")
+glimpse(edges)
+```
+
+## Cleaning
+
+### Uncertainty removal
+
+First we want to filter out the dyads with unbanded birds:
+```{r}
+unbanded <- edges %>% 
+  filter(Individual1 == "U" | Individual2 == "U")
+
+slice_head(unbanded, n=10)  
+
+nrow(unbanded)
+```
+
+We have ~800 observations now, and have to remove the ones with uncertainty
+
+```{r}
+edges %>% 
+  anti_join(unbanded)
+```
+
+Interesting that some of the uncertain id ones also have an unbanded, reducing data loss. 
+```{r}
+uncertain_id <- edges %>% 
+  filter(str_detect(Individual1, "\\?") | str_detect(Individual2, "\\?"))
+```
 
 
+
+```{r}
+
+juv_unbanded <- edges %>% 
+  filter(str_detect(Individual1, "juv") | str_detect(Individual2, "juv"))
+  
+```
+
+
+Now we can get the clean_edges by removing the unbaded, uncertain id and juveniles unbanded
+
+```{r clean_edges, message=FALSE}
+
+clean_edges <- edges %>% 
+  anti_join(unbanded) %>% 
+  anti_join(uncertain_id) %>% 
+  anti_join(juv_unbanded)
+```
+
+
+```{r}
 # filter out sightings with ID uncertainty:
-
 edges <- edges %>% filter(!str_detect(edges$Individual1, "\\?"))
 edges <-  edges %>% filter(!str_detect(edges$Individual2, "\\?"))
 
 
 # filter out sightings with unbanded individuals that cannot be identified:
-
 edges <- edges %>% filter(!str_detect(edges$Individual1, "U"))
 edges <- edges %>% filter(!str_detect(edges$Individual2, "U"))
 
