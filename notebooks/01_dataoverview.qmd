@@ -104,23 +104,23 @@ attributes <- rawdata %>%
 ```
 
 
-
 ```{r}
-
-# let's collapse this data down so that we get rid of repeat individuals in the data (recaptures),
-# so we have one row of attributes for each individual
-
-attributes <- rawdata %>% distinct(Colors, .keep_all = TRUE)
 
 # let's get rid of the columns we're not interested in, just to make things tidier:
 
-attributes <- attributes %>% select(Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing,
-                                    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.)
+attributes_clean <- attributes %>% 
+  select(
+    Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing, 
+    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.
+    ) %>% 
+  janitor::clean_names()
 
+```
 
-# first, we want to fix some things in the edge list. We want to make sure that 
-# order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction,
-# should always be in the same order to avoid confusion).
+# Fix edge list for consistency in the order
+We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion)
+
+```{r}
 
 # Here, I will create a "dyadID," which gives each dyad the same name,
 # regardless of the order. This is solely for the purpose of fixing the above issue:
