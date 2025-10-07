@@ -235,118 +235,92 @@ We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which 
 ```{r}
 
 clean_edges_with_dyad_id <- clean_edges_no_dash %>% 
+  filter(!(Individual1 %in% band_ids_w_3 | Individual2 %in% band_ids_w_3)) %>% 
   group_by(Site) %>% 
   # get them sorted by alphabetical
   mutate(
     sorted_Individual1 = pmin(Individual1, Individual2),
     sorted_Individual2 = pmax(Individual1, Individual2), .after = Individual2
   ) %>%
-  # combine for id
-  mutate(dyad_id = paste(sorted_Individual1, sorted_Individual2, sep = "-"), .after = Individual2) %>%
+  # combine for id, use underscore _ so it doesn't confuse with id missing band
+  mutate(dyad_id = paste(sorted_Individual1, sorted_Individual2, sep = "_"), .after = Individual2) %>%
   select(-sorted_Individual1, -sorted_Individual2) %>% 
   ungroup()
 
 clean_edges_with_dyad_id %>% slice_sample(n=15)
 ```
 
-I want to see how many unique values we have, and how many times we saw them, and where. We have ~600 observations, and ~ distinct dyads
+I want to see how many unique values we have, and how many times we saw them, and where. We have ~600 observations, and 215 distinct dyads
 
 ```{r}
-clean_edges_with_dyad_id %>% 
-  filter(dyad_id == " YGO-NGBM")
-  dplyr::count(dyad_id)
-```
-
-
-
-Well, now I have another question. I see this and recognize some band_ids that have only 3 letters and wondering if that is ok or they are mistakes:
-
-```{r} 
-
-
-clean_edges_no_dash %>% 
-  # filter(Individual2 %in% band_ids_3)
-  filter(Individual1 %in% band_ids_3)
-```
-
-
-# Attributes
-
-Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
-
-```{r}
-# There is an error in the banding process here
-# These are new captures but accidentally got the same color combination as a previous new bird
-
-rawdata %>% 
-  filter(Status == "N") %>% 
-  anti_join(
-    rawdata %>% distinct(Colors, .keep_all = TRUE) 
-  )
-
-```
-
-These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site.
-
-
-```{r}
-rawdata %>% 
-  filter(Colors %in% c("GBBM", "RBBM"), Status == "N") %>% 
-  select(Location, Colors)
-```
-
-Based on this, we create the attribute table to keep the repeat birds since they are from different locations.
-
-```{r}
-attributes <- rawdata %>% 
-  filter(Status == "N")
-```
-
-```{r}
-
-# let's get rid of the columns we're not interested in, just to make things tidier:
-
-attributes_clean <- attributes %>% 
-  select(
-    Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing, 
-    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.
+weighted_edges <- clean_edges_with_dyad_id %>% 
+  group_by(
+    Site
+    #, Group.Interaction.
     ) %>% 
-  janitor::clean_names()
+  dplyr::count(dyad_id, name = "weight") %>% 
+  arrange(desc(weight))
 
-head(attributes_clean)
+head(weighted_edges)
+```
+
+Build a dataframe that can be used by statnet:
+
+```{r}
+edges_for_network <- weighted_edges %>% 
+  separate_wider_delim(., cols = dyad_id, "_", names = c("ID1", "ID2")) 
+head(edges_for_network)
+```
+
+We have the data separated by site, and I am not fully sure that's they way, but I suspect it might be relevant. Specially given we had two animals banded the same but in different sites. 
+Start with the site that has most obsevations, then repeat?
+
+```{r}
+# 1. Build the network object
+edges_for_network %>% 
+  count(Site)
+
+hacienda_edges <- edges_for_network %>% filter(Site == "Hacienda") %>% select(-Site) %>% ungroup()
+
+hacienda_network <- network(
+  hacienda_edges[, c("ID1", "ID2")],
+  directed = FALSE,
+  matrix.type = "edgelist"
+)
+
+# Add edge weights
+# The edge.attribute function adds an attribute to the edges in the network object
+set.edge.attribute(hacienda_network, "weight", hacienda_edges$weight)
+
+# View a summary of the network to confirm it looks right
+summary(hacienda_network)
+
+# Plot the network
+plot(hacienda_network, edge.col = "gray", edge.lwd = "weight")
 
 ```
 
-
-
+Great, this works. Lets get some very basic metrics:
 
 ```{r}
+# Basic network statistics
+# These account for edge weights if needed
 
-# Here, I will create a "dyadID," which gives each dyad the same name,
-# regardless of the order. This is solely for the purpose of fixing the above issue:
+# higher values here means more connections
+degree <- degree(hacienda_network, cmode = "freeman")
+print(degree)
 
-#also only using the edges without missing bands 
-clean_edges_no_dash$dyad_id <- apply(clean_edges_no_dash[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
+# Unsure about this one, but its higher values are more 'connected' bridge like individuals. 
+betweenness <- betweenness(hacienda_network)
+print(betweenness)
 
-clean_edges$dyad_id
-
-dyads<- data.frame(edges$dyad_id)
-
+# measure of reach - ?
+closeness <- closeness(hacienda_network)
+print(closeness)
 ```
 
+
 ```{r}
-
-
-
-# calculate edge weights by aggregating. This will collapse the repeat network
-# ties, and add a column that represent the number of repeats (edge weight):
-
-edges_with_weights <- aggregate(list(weight=rep(1,nrow(dyads))), dyads, FUN=sum)
-
-# separate the dyads into separate columns again so we have an edge list,
-# just like we started with:
-
-edges <- edges_with_weights  %>% separate_wider_delim(edges.dyad_id, "_", names = c("col1","col2"))
 
 # create a network object in statnet
 
@@ -421,6 +395,73 @@ get.vertex.attribute(network,"Sex")
 
 
 ```
+
+
+
+# Attributes
+
+Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
+
+```{r}
+# There is an error in the banding process here
+# These are new captures but accidentally got the same color combination as a previous new bird
+
+rawdata %>% 
+  filter(Status == "N") %>% 
+  anti_join(
+    rawdata %>% distinct(Colors, .keep_all = TRUE) 
+  )
+
+```
+
+These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site.
+
+
+```{r}
+rawdata %>% 
+  filter(Colors %in% c("GBBM", "RBBM"), Status == "N") %>% 
+  select(Location, Colors)
+```
+
+Based on this, we create the attribute table to keep the repeat birds since they are from different locations.
+
+```{r}
+attributes <- rawdata %>% 
+  filter(Status == "N")
+```
+
+```{r}
+
+# let's get rid of the columns we're not interested in, just to make things tidier:
+
+attributes_clean <- attributes %>% 
+  select(
+    Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing, 
+    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.
+    ) %>% 
+  janitor::clean_names()
+
+head(attributes_clean)
+
+```
+
+
+
+
+```{r}
+
+# Here, I will create a "dyadID," which gives each dyad the same name,
+# regardless of the order. This is solely for the purpose of fixing the above issue:
+
+#also only using the edges without missing bands 
+clean_edges_no_dash$dyad_id <- apply(clean_edges_no_dash[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
+
+clean_edges$dyad_id
+
+dyads<- data.frame(edges$dyad_id)
+
+```
+
 
 ```{r}
 # let's also load the data in group format, as a list (since this is the input
