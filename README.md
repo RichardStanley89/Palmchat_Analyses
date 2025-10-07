@@ -7,6 +7,7 @@ Please contact the author for access.
 This is the current file directory tree:
 To update the tree, run `fs::dir_tree` in console and paste here.
 
+```
 ├── Palmchat_Analyses.Rproj
 ├── README.md
 ├── notebooks
@@ -15,3 +16,4 @@ To update the tree, run `fs::dir_tree` in console and paste here.
     ├── PalmchatBandingDataAll.csv
     ├── PalmchatDyads.csv
     └── PalmchatGroups.csv
+```
