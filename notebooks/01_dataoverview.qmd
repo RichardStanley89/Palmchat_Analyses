@@ -312,7 +312,7 @@ hacienda_network <- network(
 set.edge.attribute(hacienda_network, "weight", hacienda_edges$weight)
 
 # View a summary of the network to confirm it looks right
-summary(hacienda_network)
+hacienda_network
 
 # Plot the network
 plot(hacienda_network, edge.col = "gray", edge.lwd = "weight")
@@ -399,6 +399,16 @@ nrow(hacienda_attributes)
 
 ```
 
+```{r}
+# Want to check the nest data
+
+hacienda_attributes %>% head()
+
+hacienda_attributes %>% 
+  distinct(nest_affiliation_2024)
+
+get.vertex.attribute(hacienda_network,"vertex.names")
+```
 
 
 ```{r}
