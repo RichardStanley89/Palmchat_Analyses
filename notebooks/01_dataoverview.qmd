@@ -24,16 +24,17 @@ We are loading the three datasets here, and taking a quick look. The `Dyads` dat
 
 ```{r load_data}
 rawdata <- read.csv("../rawdata/PalmchatBandingDataAll.csv")
-glimpse(rawdata)
+head(rawdata)
 edges <- read.csv("../rawdata/PalmchatDyads.csv")
-glimpse(edges)
+head(edges)
 ```
 
 ## Cleaning
 
 ### Uncertainty removal
 
-First we want to filter out the dyads with unbanded birds:
+First we want to filter out the dyads with unbanded birds, which is around \~260 observations
+
 ```{r}
 unbanded <- edges %>% 
   filter(str_detect(Individual1, "U") | str_detect(Individual2, "U") |
@@ -44,21 +45,33 @@ slice_head(unbanded, n=10)
 nrow(unbanded)
 ```
 
-We have ~800 observations now, and have to remove the ones with uncertainty
+J: are these observations with unbanded individuals evenly spread over the study period? Or are there any specific days that are overrepresented?
+
+```{r}
+unbanded %>% 
+  mutate(Date = lubridate::ymd(Date)) %>% 
+  ggplot(aes(x = Date)) +
+  geom_bar()
+```
+
+We have \~800 observations now, and have to remove the ones with uncertainty
 
 ```{r}
 edges %>% 
   anti_join(unbanded)
 ```
 
-Interesting that some of the uncertain id ones also have an unbanded, reducing data loss. 
+Interesting that some of the uncertain id ones also have an unbanded, reducing data loss.
+
 ```{r}
 uncertain_id <- edges %>% 
   filter(str_detect(Individual1, "\\?") | str_detect(Individual2, "\\?"))
+head(uncertain_id)
+
 ```
 
 
-Now we can get the clean_edges by removing the unbaded, uncertain id and juveniles unbanded
+Now we can get the clean_edges by removing the unbamded, uncertain id and juveniles unbanded
 
 ```{r clean_edges, message=FALSE}
 
@@ -67,38 +80,117 @@ clean_edges <- edges %>%
   anti_join(uncertain_id)
 ```
 
-
 ## Fix Bands
 
 ```{r}
-# Create vectors for In1, and 2
-# match and keep only distinct ones
-# Identify characters that are not valid (-), or missing
+# Step 1: identify the individual ids
+band_ids <- unique(c(clean_edges$Individual1, clean_edges$Individual2)) %>% 
+  str_trim()
 
-# The correct 
-# They should all be following 4 letters
+# Step 2: separate the ones that have a missing band
+ids_with_dash <- str_subset(band_ids, "-")
+ids_with_dash
+# W-WM this one is a true id because they ran out of bands
+# remove from list
+ids_with_dash <- ids_with_dash[ids_with_dash != "W-WM"]
+ids_with_dash
 
-band_ids <- unique(c(clean_edges$Individual1, clean_edges$Individual2))
+# Step 3: identify potential matches:
+create_pattern <- function(id) {
+  str_replace_all(id, "-", ".")
+}
+
+patterns <- sapply(ids_with_dash, create_pattern)
+
+# Step 3: Use str_detect to find all matching IDs
+matches <- sapply(patterns, function(pattern) {
+  matched_ids <- str_subset(band_ids, pattern)
+  return(matched_ids)
+})
+
+names(matches) <- ids_with_dash
+print(matches)
+
+```
+Those seem harder to resolve. Maybe we can filter by location? 
 
 
-tibble(band_ids = band_ids) %>% 
-  mutate(band1 = str_trim(band_ids)) %>% 
-  # mutate(match_ = match(band_ids, band1)) # WANT TO get a true false
-  filter(str_detect(band_ids, "-"))
+```{r}
+# Double check that there are only two sites:
+unique(clean_edges$Site)
 
-# we need to identify which/match which ones they could be.
-# match by placement
+# Separate the dataset based on the 'site' variable
+clean_edges_hacienda <- clean_edges %>% filter(Site == "Hacienda")
+clean_edges_corales <- clean_edges %>% filter(Site == "Corales")
 
-#W-WM this one is a true id because they ran out of bands
+# Repeat process for both:
+get_ids_with_dash <- function(clean_edges_subset) {
+  # Step 1: Identify the individual IDs
+  band_ids <- unique(c(clean_edges_subset$Individual1, clean_edges_subset$Individual2)) %>%
+    str_trim()
+  
+  # Step 2: Separate the ones that have a missing band
+  ids_with_dash <- str_subset(band_ids, "-") %>%
+    .[. != "W-WM"]  # Remove the known valid ID
+  
+  band_ids_no_dash <- setdiff(band_ids, ids_with_dash)
+  
+  # Step 3: Identify potential matches
+  create_pattern <- function(id) {
+    str_replace_all(id, "-", ".")
+  }
+  patterns <- sapply(ids_with_dash, create_pattern)
+  
+  # Step 4: Use str_detect to find all matching IDs
+  matches <- sapply(patterns, function(pattern) {
+    matched_ids <- str_subset(band_ids_no_dash, pattern)
+    return(matched_ids)
+  })
+  names(matches) <- ids_with_dash
+  
+  return(
+    list(ids_with_dash = ids_with_dash,
+         matches = matches)
+  )
+  
+}
 
-# isolate the ones that have only 3 or 2
+# Process each subset
+cat("Hacienda \n")
+get_ids_with_dash(clean_edges_hacienda)
+
+cat("Corales \n")
+get_ids_with_dash(clean_edges_corales)
+```
+I don't think we can resolve these uncertain banding patterns. Let's check how much data we lose if we take them out:
+
+```{r}
+ids_with_dash
+
+# it's just 1 observation here
+clean_edges_hacienda %>% 
+  filter(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash)
+
+# It's 18 observations here
+clean_edges_corales %>% 
+  filter(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash)
 ```
 
+For the sake of certainty, for now, let's just remove these observations. Unfortunately, for the corales data, some of the ones we are removing also show as group interactions, so I don't know if there is a way we can keep that data. 
 
+```{r}
+# We get 652 observations here
+clean_edges_no_dash <- clean_edges %>% 
+  filter(!Individual1 %in% ids_with_dash | !Individual2 %in% ids_with_dash)
 
+clean_edges_no_dash %>% 
+  count(Site)
+```
 
-Let's take a look at the attributes associated with each bird, in the raw banding data:
-Clean out the recaptures first
+## Attributes
+
+Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
+
 ```{r}
 # There is an error in the banding process here
 # These are new captures but accidentally got the same color combination as a previous new bird
@@ -110,19 +202,22 @@ rawdata %>%
   )
 
 ```
+
 These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site.
+
+
 ```{r}
 rawdata %>% 
   filter(Colors %in% c("GBBM", "RBBM"), Status == "N") %>% 
   select(Location, Colors)
 ```
-Based on this, we create the attribute table to keep the repeat birds since they are from different locations. 
+
+Based on this, we create the attribute table to keep the repeat birds since they are from different locations.
 
 ```{r}
 attributes <- rawdata %>% 
   filter(Status == "N")
 ```
-
 
 ```{r}
 
@@ -135,13 +230,13 @@ attributes_clean <- attributes %>%
     ) %>% 
   janitor::clean_names()
 
+head(attributes_clean)
+
 ```
 
-
-
-
 # Fix edge list for consistency in the order
-We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. 
+
+We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion.
 
 ```{r}
 
@@ -155,8 +250,6 @@ clean_edges$dyad_id
 dyads<- data.frame(edges$dyad_id)
 
 ```
-
-
 
 ```{r}
 
