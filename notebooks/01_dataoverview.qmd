@@ -319,6 +319,74 @@ closeness <- closeness(hacienda_network)
 print(closeness)
 ```
 
+# Adding attributes
+
+Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
+
+```{r}
+# There is an error in the banding process here
+# These are new captures but accidentally got the same color combination as a previous new bird
+
+rawdata %>% 
+  filter(Status == "N") %>% 
+  anti_join(
+    rawdata %>% distinct(Colors, .keep_all = TRUE) 
+  )
+
+```
+
+These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site.
+
+
+```{r}
+rawdata %>% 
+  filter(Colors %in% c("GBBM", "RBBM"), Status == "N") %>% 
+  select(Location, Colors)
+```
+
+Based on this, we create the attribute table to keep the repeat birds since they are from different locations.
+
+```{r}
+attributes <- rawdata %>% 
+  filter(Status == "N")
+```
+
+```{r}
+
+# let's get rid of the columns we're not interested in, just to make things tidier:
+
+attributes_clean <- attributes %>% 
+  select(
+    Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing, 
+    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.
+    ) %>% 
+  janitor::clean_names()
+
+head(attributes_clean)
+
+```
+
+Filter to hacienda to join with the network above:
+
+```{r}
+# hacienda_edges
+hacienda_ids <- unique(c(hacienda_edges$ID1, hacienda_edges$ID2))
+
+hacienda_attributes <- attributes_clean %>% 
+  filter(!colors %in% hacienda_ids)
+
+length(hacienda_ids)
+nrow(hacienda_attributes)
+
+```
+
+We are missing one value somewhere, a bird. Maybe just never recaptured?
+
+```{r}
+
+```
+
+
 
 ```{r}
 
@@ -398,69 +466,9 @@ get.vertex.attribute(network,"Sex")
 
 
 
-# Attributes
-
-Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
-
-```{r}
-# There is an error in the banding process here
-# These are new captures but accidentally got the same color combination as a previous new bird
-
-rawdata %>% 
-  filter(Status == "N") %>% 
-  anti_join(
-    rawdata %>% distinct(Colors, .keep_all = TRUE) 
-  )
-
-```
-
-These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site.
-
-
-```{r}
-rawdata %>% 
-  filter(Colors %in% c("GBBM", "RBBM"), Status == "N") %>% 
-  select(Location, Colors)
-```
-
-Based on this, we create the attribute table to keep the repeat birds since they are from different locations.
-
-```{r}
-attributes <- rawdata %>% 
-  filter(Status == "N")
-```
-
-```{r}
-
-# let's get rid of the columns we're not interested in, just to make things tidier:
-
-attributes_clean <- attributes %>% 
-  select(
-    Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing, 
-    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.
-    ) %>% 
-  janitor::clean_names()
-
-head(attributes_clean)
-
-```
 
 
 
-
-```{r}
-
-# Here, I will create a "dyadID," which gives each dyad the same name,
-# regardless of the order. This is solely for the purpose of fixing the above issue:
-
-#also only using the edges without missing bands 
-clean_edges_no_dash$dyad_id <- apply(clean_edges_no_dash[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
-
-clean_edges$dyad_id
-
-dyads<- data.frame(edges$dyad_id)
-
-```
 
 
 ```{r}
