@@ -225,7 +225,7 @@ filtered_indices
 clean_edges_no_dash[filtered_indices,]
 
 clean_edges_no_dash$Individual2[85] <- "RBWM"
-clean_edges_no_dash$Individual1[90] <- "WWMM"
+clean_edges_no_dash$Individual1[90] <- "W-WM"
 clean_edges_no_dash$Individual2[312] <- "YGOM"
 
 # Check overwritten:
@@ -316,6 +316,7 @@ set.edge.attribute(hacienda_network, "weight", hacienda_edges$weight)
 
 # View a summary of the network to confirm it looks right
 hacienda_network
+summary(hacienda_network)
 
 # Plot the network
 plot(hacienda_network, edge.col = "gray", edge.lwd = "weight")
@@ -379,7 +380,7 @@ attributes <- rawdata %>%
 
 attributes_clean <- attributes %>% 
   select(
-    Year, Month, Day, Colors, Molecular_Sex, Body_Mass, UNFLT_Wing, 
+    Year, Month, Day, Colors, Location, Molecular_Sex, Body_Mass, UNFLT_Wing, 
     Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.
     ) %>% 
   janitor::clean_names()
@@ -394,12 +395,14 @@ Filter to hacienda to join with the network above:
 # hacienda_edges
 hacienda_ids <- unique(c(hacienda_edges$ID1, hacienda_edges$ID2))
 
+attributes_clean %>% 
+  filter(location == "Hacienda") # 129 banded/captured
+
 hacienda_attributes <- attributes_clean %>% 
   filter(colors %in% hacienda_ids)
 
 length(hacienda_ids)
 nrow(hacienda_attributes)
-
 ```
 
 ```{r}
@@ -408,9 +411,20 @@ nrow(hacienda_attributes)
 hacienda_attributes %>% head()
 
 hacienda_attributes %>% 
-  distinct(nest_affiliation_2024)
+  count(nest_affiliation_2024)
 
-get.vertex.attribute(hacienda_network,"vertex.names")
+# need to join the 'unknowns'
+# figure out how to identify the one with two nests
+# Q: how do the models handle missing data? thinking of the nests.
+
+# substructure of the nest:
+hacienda_attributes %>% 
+  count(entrance_affiliation_based_on_videos_2024)
+```
+
+```{r}
+hacienda_attributes %>% 
+  count(molecular_sex)
 ```
 
 
@@ -489,11 +503,6 @@ get.vertex.attribute(network,"Sex")
 
 
 ```
-
-
-
-
-
 
 
 
