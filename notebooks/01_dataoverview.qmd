@@ -90,6 +90,7 @@ band_ids <- unique(c(clean_edges$Individual1, clean_edges$Individual2)) %>%
 # Step 2: separate the ones that have a missing band
 ids_with_dash <- str_subset(band_ids, "-")
 ids_with_dash
+
 # W-WM this one is a true id because they ran out of bands
 # remove from list
 ids_with_dash <- ids_with_dash[ids_with_dash != "W-WM"]
@@ -174,20 +175,52 @@ clean_edges_hacienda %>%
 # It's 18 observations here
 clean_edges_corales %>% 
   filter(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash)
+
+# We can fix one of these:
+# "Y-NM" => "YBNM"
+
+clean_edges %>% 
+  mutate(Individual1 = ifelse(Individual1 == "Y-NM", "YBNM", Individual1),
+         Individual2 = ifelse(Individual1 == "Y-NM", "YBNM", Individual2)) -> clean_edges
+
+# and also wondering if the "Y-BM" could be a misread of "YBNM"
+# It's only 2 observations
+clean_edges %>% 
+  filter(Individual1 == "Y-BM" | Individual2 == "Y-BM")
 ```
 
-For the sake of certainty, for now, let's just remove these observations. Unfortunately, for the corales data, some of the ones we are removing also show as group interactions, so I don't know if there is a way we can keep that data. 
+For the sake of certainty, for now, let's just remove the unresolved observations. Unfortunately, for the corales data, some of the ones we are removing also show as group interactions, so I don't know if there is a way we can keep that data. 
 
 ```{r}
-# We get 652 observations here
+# We get 638 observations here
 clean_edges_no_dash <- clean_edges %>% 
-  filter(!Individual1 %in% ids_with_dash | !Individual2 %in% ids_with_dash)
+  filter(!(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash))
+
+# clean_edges %>% 
+#   filter(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash)
 
 clean_edges_no_dash %>% 
   count(Site)
 ```
 
-## Attributes
+## Fix edge list for consistency in the order
+
+We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. Because we have the individuals with same band pattern, we also want to do this by site, and removing any observations that have missing bands. 
+
+```{r}
+
+clean_edges_no_dash %>% 
+  group_by(Site) %>% 
+  rowwise() %>%
+  mutate(dyad_id = paste(sort(c(Individual1, Individual2)), collapse = "-"), 
+         .after = Individual2) %>%
+  ungroup() %>% 
+  # Check the unique dyads
+  count(dyad_id)
+
+```
+
+# Attributes
 
 Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
 
@@ -234,16 +267,16 @@ head(attributes_clean)
 
 ```
 
-# Fix edge list for consistency in the order
 
-We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion.
+
 
 ```{r}
 
 # Here, I will create a "dyadID," which gives each dyad the same name,
 # regardless of the order. This is solely for the purpose of fixing the above issue:
 
-clean_edges$dyad_id <- apply(clean_edges[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
+#also only using the edges without missing bands 
+clean_edges_no_dash$dyad_id <- apply(clean_edges_no_dash[,c("Individual1","Individual2")], 1, FUN= function(x) paste(sort(x), collapse="_"))
 
 clean_edges$dyad_id
 
