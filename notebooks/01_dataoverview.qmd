@@ -74,7 +74,6 @@ head(uncertain_id)
 Now we can get the clean_edges by removing the unbamded, uncertain id and juveniles unbanded
 
 ```{r clean_edges, message=FALSE}
-
 clean_edges <- edges %>% 
   anti_join(unbanded) %>% 
   anti_join(uncertain_id) %>% 
@@ -223,8 +222,14 @@ filtered_indices <- which(clean_edges_no_dash$Individual1 %in% band_ids_w_3 |
 
 filtered_indices
 
-clean_edges_no_dash[c(80:90),]
+clean_edges_no_dash[filtered_indices,]
 
+clean_edges_no_dash$Individual2[85] <- "RBWM"
+clean_edges_no_dash$Individual1[90] <- "WWMM"
+clean_edges_no_dash$Individual2[312] <- "YGOM"
+
+# Check overwritten:
+clean_edges_no_dash[filtered_indices,]
 ```
 
 As I was working with the attributes below, I also found a couple with only 2 letters, so checking those:
