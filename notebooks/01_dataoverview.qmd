@@ -77,7 +77,9 @@ Now we can get the clean_edges by removing the unbamded, uncertain id and juveni
 
 clean_edges <- edges %>% 
   anti_join(unbanded) %>% 
-  anti_join(uncertain_id)
+  anti_join(uncertain_id) %>% 
+  mutate(Individual1 = str_trim(Individual1),
+         Individual2 = str_trim(Individual2))
 ```
 
 ## Fix Bands
@@ -203,22 +205,70 @@ clean_edges_no_dash %>%
   count(Site)
 ```
 
+I also found that some of the observations have patterns with only 3 letters, which doesn't work here.
+Need to check these with Rick but for now, removing. 
+
+```{r}
+
+band_ids_w_3 <- band_ids[str_length(band_ids) == 3]
+band_ids_w_3
+
+# Unsure if these could match anything else
+# But it is only 3 observations, so I think we might need to remove them as well
+clean_edges_no_dash %>% 
+  filter(Individual1 %in% band_ids_w_3 | Individual2 %in% band_ids_w_3)
+
+filtered_indices <- which(clean_edges_no_dash$Individual1 %in% band_ids_w_3 |
+                            clean_edges_no_dash$Individual2 %in% band_ids_w_3)
+
+filtered_indices
+
+clean_edges_no_dash[c(80:90),]
+
+```
+
+
 ## Fix edge list for consistency in the order
 
 We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. Because we have the individuals with same band pattern, we also want to do this by site, and removing any observations that have missing bands. 
 
 ```{r}
 
-clean_edges_no_dash %>% 
+clean_edges_with_dyad_id <- clean_edges_no_dash %>% 
   group_by(Site) %>% 
-  rowwise() %>%
-  mutate(dyad_id = paste(sort(c(Individual1, Individual2)), collapse = "-"), 
-         .after = Individual2) %>%
-  ungroup() %>% 
-  # Check the unique dyads
-  count(dyad_id)
+  # get them sorted by alphabetical
+  mutate(
+    sorted_Individual1 = pmin(Individual1, Individual2),
+    sorted_Individual2 = pmax(Individual1, Individual2), .after = Individual2
+  ) %>%
+  # combine for id
+  mutate(dyad_id = paste(sorted_Individual1, sorted_Individual2, sep = "-"), .after = Individual2) %>%
+  select(-sorted_Individual1, -sorted_Individual2) %>% 
+  ungroup()
 
+clean_edges_with_dyad_id %>% slice_sample(n=15)
 ```
+
+I want to see how many unique values we have, and how many times we saw them, and where. We have ~600 observations, and ~ distinct dyads
+
+```{r}
+clean_edges_with_dyad_id %>% 
+  filter(dyad_id == " YGO-NGBM")
+  dplyr::count(dyad_id)
+```
+
+
+
+Well, now I have another question. I see this and recognize some band_ids that have only 3 letters and wondering if that is ok or they are mistakes:
+
+```{r} 
+
+
+clean_edges_no_dash %>% 
+  # filter(Individual2 %in% band_ids_3)
+  filter(Individual1 %in% band_ids_3)
+```
+
 
 # Attributes
 
