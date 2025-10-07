@@ -246,8 +246,6 @@ clean_edges_no_dash %>%
 which(clean_edges_no_dash$Individual1 %in% band_ids_w_2 |
                             clean_edges_no_dash$Individual2 %in% band_ids_w_2)
 
-clean_edges_no_dash[c(80:90),]
-
 ```
 
 
@@ -258,7 +256,7 @@ We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which 
 ```{r}
 
 clean_edges_with_dyad_id <- clean_edges_no_dash %>% 
-  filter(!(Individual1 %in% band_ids_w_3 | Individual2 %in% band_ids_w_3)) %>% 
+  # filter(!(Individual1 %in% band_ids_w_3 | Individual2 %in% band_ids_w_3)) %>% #fixed
   filter(!(Individual1 %in% band_ids_w_2 | Individual2 %in% band_ids_w_2)) %>% 
   group_by(Site) %>% 
   # get them sorted by alphabetical
