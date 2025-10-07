@@ -227,6 +227,24 @@ clean_edges_no_dash[c(80:90),]
 
 ```
 
+As I was working with the attributes below, I also found a couple with only 2 letters, so checking those:
+```{r}
+
+band_ids_w_2 <- band_ids[str_length(band_ids) == 2]
+band_ids_w_2
+
+# It's only one, check how many in the observations
+clean_edges_no_dash %>% 
+  filter(Individual1 %in% band_ids_w_2 | Individual2 %in% band_ids_w_2)
+
+# single row, so just remove it
+which(clean_edges_no_dash$Individual1 %in% band_ids_w_2 |
+                            clean_edges_no_dash$Individual2 %in% band_ids_w_2)
+
+clean_edges_no_dash[c(80:90),]
+
+```
+
 
 ## Fix edge list for consistency in the order
 
@@ -236,6 +254,7 @@ We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which 
 
 clean_edges_with_dyad_id <- clean_edges_no_dash %>% 
   filter(!(Individual1 %in% band_ids_w_3 | Individual2 %in% band_ids_w_3)) %>% 
+  filter(!(Individual1 %in% band_ids_w_2 | Individual2 %in% band_ids_w_2)) %>% 
   group_by(Site) %>% 
   # get them sorted by alphabetical
   mutate(
@@ -373,16 +392,10 @@ Filter to hacienda to join with the network above:
 hacienda_ids <- unique(c(hacienda_edges$ID1, hacienda_edges$ID2))
 
 hacienda_attributes <- attributes_clean %>% 
-  filter(!colors %in% hacienda_ids)
+  filter(colors %in% hacienda_ids)
 
 length(hacienda_ids)
 nrow(hacienda_attributes)
-
-```
-
-We are missing one value somewhere, a bird. Maybe just never recaptured?
-
-```{r}
 
 ```
 
