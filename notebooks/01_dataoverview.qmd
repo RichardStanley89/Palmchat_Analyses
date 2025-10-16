@@ -391,32 +391,78 @@ membership(comm_louvain)
 
 ```{r}
 # Basic visualization colored by group
+# You can do fancier with ggraph
 plot(comm_louvain, hacienda_network,
      vertex.size = 5,
      vertex.label = NA,
      edge.width = E(hacienda_network)$weight / 2,  # scale edge width by observations
-     main = "Site 1 Social Network")
-
-# Or with more control:
-library(ggraph)
-library(tidygraph)
-
-net_tidy <- as_tbl_graph(hacienda_network) %>%
-  activate(nodes) %>%
-  mutate(community = as.factor(groups))
-
-ggraph(net_tidy, layout = "fr") +  # Fruchterman-Reingold layout
-  geom_edge_link(aes(width = weight), alpha = 0.3, color = "gray50") +
-  geom_node_point(aes(color = community), size = 3) +
-  scale_edge_width(range = c(0.2, 2)) +
-  theme_graph() +
-  labs(title = "Palmchat Social Network - Site 1",
-       subtitle = paste("Modularity =", round(modularity(comm_louvain), 3)))
+     main = "Hacienda Site")
 ```
 
 
+```{r}
+# Generate random networks with same degree distribution
+n_permutations <- 1000
+null_modularity <- numeric(n_permutations)
+
+for(i in 1:n_permutations) {
+  # Randomly permute edges while keeping degree sequence
+  random_net <- rewire(hacienda_network, keeping_degseq(niter = ecount(hacienda_network) * 10))
+  random_comm <- cluster_louvain(random_net, weights = E(random_net)$weight)
+  null_modularity[i] <- modularity(random_comm)
+}
+
+# Compare observed to null
+observed_mod <- modularity(comm_louvain)
+# What proportion of random networks had modularity >= observed?
+p_value <- mean(null_modularity >= observed_mod)
+# Calculate z-score for effect size assuming normal dist
+z_score <- (observed_mod - mean(null_modularity)) / sd(null_modularity)
+
+# Report results
+cat("Observed modularity:", round(observed_mod, 4), "\n")
+cat("Mean null modularity:", round(mean(null_modularity), 4), "\n")
+cat("SD null modularity:", round(sd(null_modularity), 4), "\n")
+cat("Z-score:", round(z_score, 2), "\n")
+cat("P-value:", p_value, "\n")
+
+# Visualize
+hist(null_modularity, breaks = 30, 
+     main = "Modularity: Observed vs. Random Networks",
+     xlab = "Modularity",
+     col = "lightgray",
+     xlim = range(c(null_modularity, observed_mod)))
+abline(v = observed_mod, col = "red", lwd = 3)
+abline(v = mean(null_modularity), col = "blue", lwd = 2, lty = 2)
+legend("topright", 
+       c("Observed", "Null mean"), 
+       col = c("red", "blue"), 
+       lwd = c(3, 2), 
+       lty = c(1, 2))
+text(x = observed_mod, y = par("usr")[4] * 0.9, 
+     labels = paste0("Z = ", round(z_score, 2)), 
+     pos = 4, col = "red")
+
+```
+Permutation tests (1,000 iterations) confirmed that the observed social structure was highly non-random. The observed modularity (0.74) was significantly higher than expected by chance (mean null = 0.44, z = 23.76, p < 0.001), with none of the randomized networks approaching the modularity of the actual palmchat network.
+
+
+
+::: note
+Rick, next steps are to repeat these analyses with the other site. You also mentioned doing it by season, so you could try separating the data by season and comparing the results. 
+:::
 
 # Adding attributes
+
+Trying to answer 
+
+2) Understanding Predictors of Social Structure:
+
+· What drives the patterns of social associations in palmchat networks? (eg., are birds more likely to be connected in the network or belong to the same social group if they have certain characteristics)?
+
+· Do birds from the same nest belong to the same social group? (answer here will likely be yes).
+
+· Do social groups typically have more males than females?
 
 Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
 
@@ -432,8 +478,7 @@ rawdata %>%
 
 ```
 
-These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site.
-
+These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site. (we did)
 
 ```{r}
 rawdata %>% 
@@ -466,40 +511,96 @@ head(attributes_clean)
 Filter to hacienda to join with the network above:
 
 ```{r}
-# hacienda_edges
-hacienda_ids <- unique(c(hacienda_edges$ID1, hacienda_edges$ID2))
+# Get the bird ids from the hacienda network
+hacienda_ids <- V(hacienda_network)$name
 
 attributes_clean %>% 
   filter(location == "Hacienda") # 129 banded/captured
 
 hacienda_attributes <- attributes_clean %>% 
-  filter(colors %in% hacienda_ids)
+  filter(colors %in% hacienda_ids) 
+# %>%
+#   filter(location == "Hacienda")
+# We have a mismatch, or perhaps an error here
+# The ids recovered from the hacienda observations seem to match birds initially captured in corales, which tells me we probably can't differentiate between those birds that were duplicated with the bands
 
-length(hacienda_ids)
-nrow(hacienda_attributes)
+attribute_ids <- hacienda_attributes_clean$colors
+missing_birds <- setdiff(hacienda_ids, attribute_ids)
+# Why do we have missing birds from the attribute?
+
+hacienda_edges %>% 
+  filter(ID1 %in% missing_birds | ID2 %in% missing_birds)
+# These are just once, there must be an observation error. 
+
+
+
+# This needs to be cleaned but I'm not sure how to decide
+# now it also makes me wonder if making the analysis by site is ideal or not
+
+hacienda_ids %in% hacienda_attributes$colors
+hacienda_ids[46]
+# This one was observed but is missing from the captures
+hacienda_attributes %>% filter(colors == "GSSM")
+```
+
+We have some mismatches and things to clean here:
+```{r}
+# Check what "empty" cells actually contain
+unique(hacienda_attributes$molecular_sex)
+unique(hacienda_attributes$nest_affiliation_2024)
+unique(hacienda_attributes$entrance_affiliation_based_on_videos_2024)
+
+# Check for empty strings, spaces, etc.
+table(hacienda_attributes$molecular_sex, useNA = "always")
+table(hacienda_attributes$nest_affiliation_2024, useNA = "always")
 ```
 
 ```{r}
-# Want to check the nest data
+# Convert empty strings and spaces to NA
+hacienda_attributes_clean <- hacienda_attributes %>%
+  mutate(
+    molecular_sex = na_if(molecular_sex, ""),
+    molecular_sex = na_if(molecular_sex, " "),
+    # Clean entrance_affiliation (empty strings to NA)
+    entrance_affiliation_based_on_videos_2024 = na_if(entrance_affiliation_based_on_videos_2024, ""),
+    entrance_affiliation_based_on_videos_2024 = na_if(entrance_affiliation_based_on_videos_2024, " "),
+    # Clean nest_affiliation_2024 (empty strings and "Unknown" to NA)
+    nest_affiliation_2024 = na_if(nest_affiliation_2024, ""),
+    nest_affiliation_2024 = na_if(nest_affiliation_2024, " "),
+    nest_affiliation_2024 = na_if(nest_affiliation_2024, "Unknown")
+  ) %>% 
+  mutate(
+    nest_affiliation_2024 = case_when(
+      nest_affiliation_2024 == "Nest_10 AND Nest_1" ~ "Nest_10",
+      TRUE ~ nest_affiliation_2024
+    ))
 
-hacienda_attributes %>% head()
 
-hacienda_attributes %>% 
-  count(nest_affiliation_2024)
 
-# need to join the 'unknowns'
-# figure out how to identify the one with two nests
-# Q: how do the models handle missing data? thinking of the nests.
-
-# substructure of the nest:
-hacienda_attributes %>% 
-  count(entrance_affiliation_based_on_videos_2024)
+# Check the result
+table(hacienda_attributes_clean$nest_affiliation_2024, useNA = "always")
+sum(is.na(hacienda_attributes_clean$molecular_sex))
+sum(is.na(hacienda_attributes_clean$nest_affiliation_2024))
+sum(is.na(hacienda_attributes_clean$entrance_affiliation_based_on_videos_2024))
 ```
+
+We can't include the entrance affiliation, not enough data, we are missing 51/82. So need to incorporate this into your results as a descriptive result for the ~30 data points. For the other two variables we can include since we've got 60 and 80% of the birds with data on them. 
+
 
 ```{r}
-hacienda_attributes %>% 
-  count(molecular_sex)
+# Check for duplicate birds
+dup_birds <- hacienda_attributes_clean$colors[duplicated(hacienda_attributes_clean$colors)]
+
+cat("Birds appearing multiple times:", length(dup_birds), "\n")
+  print(hacienda_attributes_clean %>% 
+        filter(colors %in% dup_birds) %>% 
+        select(colors, year, month, day, location, nest_affiliation_2024, molecular_sex) %>%
+        arrange(colors))
 ```
+
+
+
+
 
 
 ```{r}
