@@ -71,7 +71,7 @@ head(uncertain_id)
 ```
 
 
-Now we can get the clean_edges by removing the unbamded, uncertain id and juveniles unbanded
+Now we can get the clean_edges by removing the unbanded, uncertain id and juveniles unbanded
 
 ```{r clean_edges, message=FALSE}
 clean_edges <- edges %>% 
@@ -249,7 +249,7 @@ which(clean_edges_no_dash$Individual1 %in% band_ids_w_2 |
 ```
 
 
-## Fix edge list for consistency in the order
+# Add dyad-id
 
 We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. Because we have the individuals with same band pattern, we also want to do this by site, and removing any observations that have missing bands. 
 
@@ -286,6 +286,9 @@ weighted_edges <- clean_edges_with_dyad_id %>%
 head(weighted_edges)
 ```
 
+
+## Basic analysis
+
 Build a dataframe that can be used by statnet:
 
 ```{r}
@@ -302,21 +305,44 @@ Start with the site that has most obsevations, then repeat?
 edges_for_network %>% 
   count(Site)
 
-hacienda_edges <- edges_for_network %>% filter(Site == "Hacienda") %>% select(-Site) %>% ungroup()
+# Get data for one of the sites only:
+hacienda_edges <- edges_for_network %>% filter(Site == "Hacienda") %>% ungroup() %>% select(-Site)
 
+# Build the network - use igraph first
+hacienda_network <- graph_from_data_frame(
+  hacienda_edges, 
+  directed = FALSE
+)
+
+# Basic network properties
+cat("Number of birds:", vcount(hacienda_network), "\n")
+cat("Number of unique dyads:", ecount(hacienda_network), "\n")
+cat("Network density:", edge_density(hacienda_network), "\n")
+cat("Average degree:", mean(igraph::degree(hacienda_network)), "\n")
+
+# Check if weight was loaded
+E(hacienda_network)$weight
+
+```
+
+```{r}
+
+# Create network object with statnet
 hacienda_network <- network(
   hacienda_edges[, c("ID1", "ID2")],
   directed = FALSE,
   matrix.type = "edgelist"
 )
 
-# Add edge weights
-# The edge.attribute function adds an attribute to the edges in the network object
+# Add edge weights as an attribute
 set.edge.attribute(hacienda_network, "weight", hacienda_edges$weight)
 
-# View a summary of the network to confirm it looks right
-hacienda_network
-summary(hacienda_network)
+# Now use statnet functions (different names):
+cat("Number of birds:", network.size(hacienda_network), "\n")
+cat("Number of unique dyads:", network.edgecount(hacienda_network), "\n")
+cat("Network density:", network.density(hacienda_network), "\n")
+cat("Average degree:", mean(sna::degree(hacienda_network, cmode = "indegree")), "\n")
+
 
 # Plot the network
 plot(hacienda_network, edge.col = "gray", edge.lwd = "weight")
