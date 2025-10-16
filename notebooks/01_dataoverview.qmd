@@ -679,8 +679,6 @@ get.vertex.attribute(network,"Sex")
 
 ```
 
-
-
 ```{r}
 # let's also load the data in group format, as a list (since this is the input
 # preferred by the "asnipe" package, and it preserves information about group interactions)
