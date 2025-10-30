@@ -5,6 +5,8 @@
 # we're not uploading the raw data
 
 rawdata/
+*.csv
+*.RDS
 
 # ignore DS_Storefiles
 
