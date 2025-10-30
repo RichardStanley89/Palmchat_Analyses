@@ -1,0 +1,268 @@
+---
+title: "GLM_Camera_data"
+format: html
+editor: visual
+---
+
+## Quarto
+
+```{r}
+install.packages(c('ggplot2', 
+                   'MASS',
+                   'ggpmisc',
+                   'vcdExtra',
+                   'bbmle',
+                   'DescTools',
+                   'GlmSimulatoR',
+                   'cplm')
+                 )
+library(ggplot2)
+library(MASS)
+library(vcdExtra)
+library(bbmle)
+library(DescTools)
+library(GlmSimulatoR)
+library(cplm)
+library(ggpmisc)
+library(dplyr)
+library(stringr)
+
+```
+
+```{r}
+
+
+
+Behavior_Data <- read.csv("../rawdata/Behavior_data.csv")
+
+unique(Behavior_Data$Subject)
+
+
+# Now let's make it so that we have one dataset so that each individual counts as a "sample", and has associated with it a nest, a duration of being filmed (at the nest where it could have been seen), and 
+
+
+# aggregate the observation ID:
+
+data <- Behavior_Data %>% group_by(Behavior_Data$Observation.id) %>%
+  summarise(length= length(Behavior))
+
+# 
+
+
+ggplot(data, aes(x = length)) +
+  geom_histogram(binwidth = 10)
+
+
+
+behaviorfrequency <- Behavior_Data %>% group_by(Subject, molecular_sex, body_mass) %>% filter(Behavior =="enter",
+                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
+                                       Modifier..1 == "with UNID") %>%
+  summarise(length=length(Behavior))
+
+
+hist(behaviorfrequency$length)
+
+ggplot(behaviorfrequency, aes(x = length)) +
+  geom_histogram(binwidth = 1)
+
+
+#### Caluculate duration of Camera recordings by year...
+
+behaviorfrequency <- Behavior_Data %>% filter(grepl("2025", Observation.id))
+behaviorfrequency <- Behavior_Data %>% filter(grepl("2024", Observation.id))
+
+
+CameraTimes2025 <- unique(behaviorfrequency$Duration)
+
+sum(CameraTimes2025)/3600
+
+CameraTimes2024 <- unique(behaviorfrequency$Duration)
+
+sum(CameraTimes2024)/3600
+
+### let's sum up data from the attributes_clean file from dataoverview notebook:
+
+#
+Attributes2022 <- attributes_clean %>% filter(year == 2022)
+
+## let's see how many unique birds in network data for year:
+
+Network2024 <- clean_edges %>% filter(grepl("/24",Date))
+
+Network2025 <- clean_edges %>% filter(grepl("/25",Date))
+
+
+vector<- c(Network2024$Individual1, Network2024$Individual2)
+
+vector<- c(Network2025$Individual1, Network2025$Individual2)
+
+vector<- c(clean_edges$Individual1, clean_edges$Individual2)
+
+unique(vector)
+
+
+
+
+unique(clean_edges$Individual2)
+
+unique(edges_for_network$ID2)
+
+
+#### calculate number of observations on camera data per year
+
+All <- unique(Behavior_Data$Subject)
+Year2024 <- Behavior_Data %>% filter(grepl("2024", Observation.id))
+unique(Year2024$Subject)
+
+VisitsYear2025 <- Behavior_Data %>% filter(grepl("2025", Observation.id)) %>% filter(Behavior == "enter")
+
+
+##### let's look at simultaneous provisioning going on at the same nest(but on different cameras)
+
+## filter by date and nest (let's see how nest visitation rates differ through time at a given nest)
+
+## this will be visitation rates per nest through time:
+
+VisitsByNest <- Behavior_Data %>% group_by(Date, Duration) %>% filter(Nest == "Nest2") %>% filter(Behavior == "enter") %>% summarize(length(Behavior)) %>% rename(Count = "length(Behavior)")
+
+## or don't filter by nest:
+
+VisitsByNest <- Behavior_Data %>% group_by(Date, Duration, Nest) %>% filter(Behavior == "enter") %>% summarize(length(Behavior)) %>% rename(Count = "length(Behavior)")
+
+
+NestVisits <- VisitsByNest %>% mutate(VisitationRate = (Count/Duration))
+
+NestVisits <- NestVisits %>% mutate(VisitationRate_hr = VisitationRate * 3600) %>% arrange(NestVisits$Date)
+
+library(ggplot2)
+
+
+  NestVisits %>%
+      ggplot(aes(x = Date, y = VisitationRate_hr, group = Nest, color = Nest)) +
+     geom_point(,size = 2) +
+    geom_line(size = 1) +
+      labs(title = "Nest Visitation Rate", x = "Date", y = "Visitation Rate") +
+      theme_minimal()
+  
+  
+## let's do the same as above, only this time checking if food provisioning occurs simultaneously at the same nest, different entrances, so group by entrance:
+  
+Behavior_Data <- Behavior_Data %>% mutate(BringFood = ifelse(Behavior == "enter" &
+                                                        Modifier..1 == "with fruit"| 
+                                                        Behavior == "enter" &
+                                                        Modifier..1 == "with insect"|
+                                                        Behavior == "enter" &
+                                                      Modifier..1 == "with UNID"|
+                                                        Behavior == "provision"
+                                                        , "BringFood", "NA"))
+
+
+  
+VisitsByNest <- Behavior_Data %>% group_by(Date, Duration, Nest.Entrance) %>% filter(BringFood == "BringFood") %>% summarize(length(BringFood)) %>% rename(Count = "length(BringFood)")
+
+
+NestVisits <- VisitsByNest %>% mutate(VisitationRate = (Count/Duration))
+
+NestVisits <- NestVisits %>% mutate(VisitationRate_hr = VisitationRate * 3600) %>% arrange(NestVisits$Date)
+  
+NestVisits %>%
+      ggplot(aes(x = Date, y = VisitationRate_hr, group = Nest.Entrance, color = Nest.Entrance)) +
+     geom_point(,size = 2) +
+    geom_line(size = 1) +
+      labs(title = "Nest Visitation Rate", x = "Date", y = "Visitation Rate") +
+      theme_minimal()
+
+##### FEEDING RATES #######
+
+## How about boxplots of nest visitation rates by individual, by nest?:
+
+
+VisitsByIndividual <- Behavior_Data %>% group_by(Subject, Nest, Duration) %>% filter(BringFood == "BringFood") %>% summarize(length(BringFood)) %>% rename(Count = "length(BringFood)")
+
+NestVisits <- VisitsByIndividual %>% mutate(VisitationRate = (Count/Duration))
+
+NestVisits <- NestVisits %>% mutate(VisitationRate_hr = VisitationRate * 3600) %>% filter(Nest == "Nest2" | Nest == "Nest4")
+
+ggplot(NestVisits, aes(x = Nest, y = VisitationRate_hr, fill = Subject)) +
+  geom_boxplot()
+
+
+```
+
+```{r}
+
+#### FEEDING RATES 2
+
+#### are rates of provisioning different between males and females??
+
+VisitsByIndividual1 <- Behavior_Data %>% group_by(Subject, molecular_sex, Duration) %>% filter(BringFood == "BringFood") %>% summarize(length(BringFood)) %>% rename(Count = "length(BringFood)")
+
+
+VisitsByIndividual <- VisitsByIndividual1 %>% group_by(Subject, molecular_sex) %>% summarize(sum(Duration)) %>%
+  rename(Duration = "sum(Duration)")
+
+CountData <- Behavior_Data %>% group_by(Subject) %>% filter(BringFood == "BringFood") %>% summarize(length(BringFood)) %>% rename(Counts = "length(BringFood)")
+
+NestVisits <- left_join(VisitsByIndividual,CountData, by = "Subject")
+
+NestVisits <- NestVisits %>% mutate(VisitationRate = (Counts/Duration))
+
+NestVisits <- NestVisits %>% mutate(VisitationRate_hr = VisitationRate * 3600)
+
+### How do visitation rates vary by sex???
+
+means <- NestVisits %>% group_by(molecular_sex) %>% summarize(mean(VisitationRate_hr))
+
+
+ggplot(NestVisits, aes(x = Subject, y = VisitationRate_hr, fill = Subject)) +
+  geom_boxplot()
+
+
+ggplot(NestVisits, aes(x = molecular_sex, y = VisitationRate_hr) +
+  geom_boxplot()
+
+t.test()
+
+#### these values look low...
+
+
+
+
+## Now, what is the typical group size of helpers???
+
+
+## Here, you will need to sort by EntranceID
+
+## maybe remember to include unbanded, so you could go back and use a different version of the data set...
+
+
+GroupSize <- Behavior_Data %>% group_by(Subject, Nest.Entrance) %>% filter(BringFood == "BringFood") %>% summarize(length(BringFood)) %>% rename(Count = "length(BringFood)")
+
+GroupSizes <- GroupSize %>% group_by(Nest.Entrance) %>% summarize(length(Subject)) %>% rename(Count = "length(Subject)") %>%
+filter(Nest.Entrance != "" & Nest.Entrance != "NA")
+
+mean(GroupSizes$Count)
+
+boxplot(GroupSizes$Count)
+
+
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+glm.poisson = glm(length ~ body_mass,
+  data = behaviorfrequency,
+  family = poisson)
+
+
+summary(glm.poisson)
+
+```

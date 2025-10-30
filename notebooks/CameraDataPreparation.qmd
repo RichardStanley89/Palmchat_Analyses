@@ -1,0 +1,274 @@
+---
+title: "CameraDataPreparation"
+format: html
+editor: visual
+---
+
+```{r}
+library("tidyverse")
+library("dplyr")
+library("ggplot2")
+
+# This analysis will look at the camera data filming palmchats entering, exiting,
+# and building at their nests. The dataset describes palmchat behavior at
+# the nest, quantifying frequency and duration of behaviors filmed at specific
+# nest entrances, which are usually attended by 3 (sometimes 4) birds. Filming was
+# during the breeding season, so birds are busy feeding chicks, bringing fruit
+# and insects to the nest to provision chicks. Behaviors were recorded as both
+# point and state events (eg. some are discrete events and some have a time duration associated with them)
+# using the behavioral coding software BORIS. I am interested in studying helping
+# behavior by nest helpers in this species (most nest entrances have multiple birds
+# that are seen cooperatively bringing food to the same nest entrance).
+# How are parental responsibilities shared between multiple individuals and helpers?
+# Are individuals cooperating at the nest dividing responsibilities or sharing them equally?
+```
+
+\
+
+```{r}
+# read in the behavioral data from the camera footage:
+
+Behavior_data <- read.csv("../rawdata/Palmchat_Observations_All_Oct_20_2025.csv")
+
+str(Behavior_data)
+
+
+# create new column with "media duration" fixed, now in summed-up format:
+
+split_values <- strsplit(Behavior_data$Media.duration..s., split =";")
+split_values <- sapply(split_values, as.numeric)
+Behavior_data <- Behavior_data %>% mutate(Duration = sapply(split_values, sum))
+
+# behaviors include the following:
+
+# point behaviors: arrive, enter, exit, depart, stickcarry, peck, allofeed (only observed once), provision
+# state behaviors: build, visible, preen
+```
+
+```{r}
+# We also want to add data on which focal Nests were being filmed during the filming sessions. Let's add this information
+# (which is stored in a different data set):
+
+# load the nest information from the camera data:
+
+Camera_data <- read.csv("../rawdata/FoscamCameraScheduleCodedNew.csv")
+
+# now, join the Camera data with the Behavioral data by column "Observation.id":
+
+Palmchat_Behavior_Data <- left_join(Behavior_data, Camera_data, by = "Observation.id")
+
+
+```
+
+```{r}
+# so far, we have the behavioral observations, but we don't have any data on the attributes
+# of the specific individual birds (other than their band combos). Let's load the attribute data.
+
+rawdata <- read.csv("../rawdata/PalmchatBandingDataAll.csv")
+
+
+# let's clean these so we can join them:
+
+
+attributes <- rawdata %>% 
+  filter(Status == "N")
+
+attributes_clean <- attributes %>% 
+  select(
+    Year, Month, Day, Colors, Location, Molecular_Sex, Body_Mass, UNFLT_Wing, 
+    Age, Entrance_affiliation_based_on_videos_2024, Nest_affiliation..2024.
+    ) %>% 
+  janitor::clean_names()
+
+
+attributes_clean <- attributes_clean %>% 
+  filter(!(colors == "RBBM" & location == "Corales")) %>%
+  filter(!(colors == "GBBM" & location == "Corales_Entrance"))
+
+
+### or for just Hacienda...
+
+## attributes_clean %>% 
+ # filter(location == "Hacienda")
+
+
+## hacienda_ids <- c("RYWM", "BWSM", "GWSM", "RBRM", "GBBM", "GGMB", "BYRM", "GRGM", "GSWM", "GWRM", "WBYM", "GGRM", "RYSM", "GRYM", "GWMW", "SGSM", "SRBM", "W-WM", "WYSM", "BSYM", "GSRM", "GRWM", "YGGM", "BYBM", "GWBM", "GYYM", "RBBM", "RWMY", "BBWM", "BGSM", "BGWM", "BYMY", "BBGM", "BSBM", "GGYM", "RRWM", "SYGM", "WGMS", "BBSM", "BGRM", "BRGM", "BSGM", "BSRM", "BWRM", "GBSM", "GYRM", "RGWM", "RSRM", "RSWM", "RYBM", "RYRM", "RYYM", "SBRM", "SGWM", "SRGM", "SYRM", "WSBM", "YGSM", "YGWM", "YYGM", "RBWM", "YYBM", "WRSM", "YWWM", "YWBM", "YRBM", "SWRM", "WSSM", "BSSM", "WYYM", "WYWM", "WYGM", "WRGM", "YBMG", "YGRM", "GYWM", "YRSM", "SWSM", "SSRM", "WBSM")
+
+# hacienda_ids
+
+
+# hacienda_attributes <- attributes_clean %>% 
+ # filter(!(colors == "RBBM" & location == "Corales")) %>%
+ # filter(!(colors == "GBBM" & location == "Corales_Entrance")) %>% 
+ # filter(colors %in% hacienda_ids) 
+
+# hacienda_attributes$colors
+
+# let's look at the data from the cameras to see which individuals are missing from the attribute data:
+
+unique(Palmchat_Behavior_Data$Subject)
+
+compare <- setdiff(unique(Palmchat_Behavior_Data$Subject),attributes_clean$colors)
+
+
+
+compare
+
+Palmchat_Behavior_Data_cleaned <- Palmchat_Behavior_Data %>% 
+  filter(!(Subject == "Chick1")) %>%
+  filter(!(Subject == "Chick2")) %>%
+  filter(!(Subject == "UNBANDED1")) %>%
+  filter(!(Subject == "UNBANDED2")) %>%
+  filter(!(Subject == "Unidentified")) %>%
+  filter(!(Subject == "Unidentified2")) %>%
+  filter(!(Subject == "UnbandedJuv")) %>%
+  filter(!(Subject == "No focal subject"))
+
+unique(Palmchat_Behavior_Data_cleaned$Subject)
+
+Palmchat_Behavior_Data_cleaned <- Palmchat_Behavior_Data_cleaned %>% mutate(Subject = str_replace(Subject, "SYWM", "SWYM"))
+
+
+compare <- setdiff(unique(Palmchat_Behavior_Data_cleaned$Subject),attributes_clean$colors)
+
+compare <- setdiff(unique(attributes_clean$colors),Palmchat_Behavior_Data_cleaned$Subject)
+
+compare
+
+### looks good, looks like we're ready to join the attributes now!
+
+
+attributes_clean <- attributes_clean %>% rename(Subject = colors)
+
+
+Behavior_Data <- inner_join(attributes_clean, Palmchat_Behavior_Data_cleaned, by = "Subject")
+
+write.csv(Behavior_Data, "Behavior_data.csv")
+
+
+```
+
+```{r}
+# In this data, we have two ways we have classified birds to a home nest: one is my 
+# behavioral observations in the field, and the other is based on the cameras and
+# which bird is entering on camera
+
+# Nests have multiple entrances, each with a separate group of birds living in it,
+# like a apartment complex. Therefore, birds can share the same "nest ID" and belong to
+# nest 2, but have different entrance IDs (eg. one bird might belong to Nest 2 E while 
+# another is at Nest 2 W)
+
+# Let's assign a specific entrance ID to each bird based on which nest they
+# were filmed at on the cameras:
+
+## entrances <- Palmchat_Behavior_Data %>% group_by(Subject) %>%
+#  summarise(Entrance = Nest.Entrance[[1]])
+
+# why missing values??
+```
+
+```{r}
+######## Now we have most of the data we will want for analysis in one place.
+#### Let's start by looking at some of the behaviors in the data:
+
+
+# count number of times each individual engages in the behavior "enter":
+
+
+```
+
+```{r}
+
+# let's pick some other behaviors to tally up, eg. "arrive":
+
+behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$Subject) %>% filter(Behavior == "arrive") %>%
+  summarise(length=length(Behavior))
+```
+
+```{r}
+# Some of my behaviors are "state" events, rather than "point" events. That is, they have a time duration
+# associated with them. Let's calculate total duration of specific "state" behaviors by individual:
+
+behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$Subject) %>% filter(Behavior == "visible") %>%
+  summarise(duration = sum(Duration..s.), count = n(),)
+```
+
+```{r}
+
+# let's say I want to choose a behavior based not just on the behavior state, but
+# based on a second variable as well (eg. the modifier associated with that behavior).
+# Here is how I would do that if necessary:
+
+behavior <- Behavior_Data %>% filter(Behavior == "enter",
+                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
+                                       Modifier..1 == "with UNID")
+
+
+behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$Subject) %>% filter(Behavior =="enter",
+                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
+                                       Modifier..1 == "with UNID") %>%
+  summarise(length=length(Behavior))
+
+
+
+
+# let's plot helping by males vs. helping by females
+
+behaviorfrequency <- Behavior_Data %>% group_by(molecular_sex) %>% filter(Behavior =="enter",
+                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
+                                       Modifier..1 == "with UNID") %>%
+  summarise(length=length(Behavior))
+
+
+
+ggplot(behaviorfrequency, aes(x = molecular_sex, y = length)) + geom_bar(stat = "identity")
+
+
+
+###### let's see if males or females build more:
+
+behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$molecular_sex) %>% filter(Behavior == "build") %>%
+  summarise(duration = sum(Duration..s.), count = n(),)
+
+
+#### how about provisioning by age....
+
+behaviorfrequency <- Behavior_Data %>% group_by(age) %>% filter(Behavior =="enter",
+                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
+                                       Modifier..1 == "with UNID") %>%
+  summarise(length=length(Behavior))
+
+
+```
+
+```{r}
+# one of the "point" event variables I am interested in is how many times food is brought to the nest to feed chicks, and
+# which individuals are bringing it in. Problem is, there are multiple ways I can quantify this based on my data.
+# Provisioning events were recorded like this, with a behavior modifier: (eg.
+# "enter" with fruit; "arrive" with insect). I also sometimes recorded the behavior "provision," but only used that
+# when you could clearly see food being handed off to chicks (most times, you could just see food entering the nest). 
+# So, feeding visits could show up in the data in multiple formats,
+# including: "arrive with fruit," + "enter with fruit," or, alternatively, "arrive with fruit," + "provision fruit"
+
+# let's try to deal with some of this variation in behavioral scoring by creating a new variable representing
+# every feeding visit :
+
+# create new "BringFood" variable in the dataset:
+
+
+Palmchat_data <- Palmchat_Behavior_Data %>% mutate(BringFood = ifelse(Behavior == "enter" &
+                                                        Modifier..1 == "with fruit"| 
+                                                        Behavior == "enter" &
+                                                        Modifier..1 == "with insect"|
+                                                        Behavior == "enter" &
+                                                      Modifier..1 == "with UNID"|
+                                                        Behavior == "provision"
+                                                        , "BringFood", "NA"))
+```
+
+```{r}
+# let's count how many times each individual brings food to the nest:
+
+behaviorfrequency <- Palmchat_data %>% group_by(Behavior_data$Subject) %>% filter(BringFood == "BringFood") %>%
+  summarise(length=length(Behavior))
+```
