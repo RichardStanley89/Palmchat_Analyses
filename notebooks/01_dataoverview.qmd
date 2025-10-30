@@ -72,7 +72,6 @@ head(uncertain_id)
 
 ```
 
-
 Now we can get the clean_edges by removing the unbanded, uncertain id and juveniles unbanded
 
 ```{r clean_edges, message=FALSE}
@@ -116,8 +115,8 @@ names(matches) <- ids_with_dash
 print(matches)
 
 ```
-Those seem harder to resolve. Maybe we can filter by location? 
 
+Those seem harder to resolve. Maybe we can filter by location?
 
 ```{r}
 # Double check that there are only two sites:
@@ -166,6 +165,7 @@ get_ids_with_dash(clean_edges_hacienda)
 cat("Corales \n")
 get_ids_with_dash(clean_edges_corales)
 ```
+
 I don't think we can resolve these uncertain banding patterns. Let's check how much data we lose if we take them out:
 
 ```{r}
@@ -192,24 +192,29 @@ clean_edges %>%
   filter(Individual1 == "Y-BM" | Individual2 == "Y-BM")
 ```
 
-For the sake of certainty, for now, let's just remove the unresolved observations. Unfortunately, for the corales data, some of the ones we are removing also show as group interactions, so I don't know if there is a way we can keep that data. 
+For the sake of certainty, for now, let's just remove the unresolved observations. Unfortunately, for the corales data, some of the ones we are removing also show as group interactions, so I don't know if there is a way we can keep that data.
 
 ```{r}
 # We get 638 observations here
 clean_edges_no_dash <- clean_edges %>% 
-  filter(!(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash))
+  filter(!(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash)) %>%
+  filter(Individual1!="YNGM") %>%
+  filter(Individual2!="WWGM")
 
 # clean_edges %>% 
 #   filter(Individual1 %in% ids_with_dash | Individual2 %in% ids_with_dash)
+  
 
 clean_edges_no_dash %>% 
   count(Site)
 ```
 
-I also found that some of the observations have patterns with only 3 letters, which doesn't work here.
-Need to check these with Rick but for now, removing. 
+I also found that some of the observations have patterns with only 3 letters, which doesn't work here. Need to check these with Rick but for now, removing.
 
 ```{r}
+
+unique(clean_edges$Individual1)
+
 
 band_ids_w_3 <- band_ids[str_length(band_ids) == 3]
 band_ids_w_3
@@ -235,6 +240,7 @@ clean_edges_no_dash[filtered_indices,]
 ```
 
 As I was working with the attributes below, I also found a couple with only 2 letters, so checking those:
+
 ```{r}
 
 band_ids_w_2 <- band_ids[str_length(band_ids) == 2]
@@ -250,10 +256,11 @@ which(clean_edges_no_dash$Individual1 %in% band_ids_w_2 |
 
 ```
 
-
 # Add dyad-id
 
-We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. Because we have the individuals with same band pattern, we also want to do this by site, and removing any observations that have missing bands. 
+## Fix edge list for consistency in the order
+
+We want to make sure that order is consistent (eg. BSY--YGG vs. YGG--BSY, which represent the same interaction, should always be in the same order to avoid confusion. Because we have the individuals with same band pattern, we also want to do this by site, and removing any observations that have missing bands.
 
 ```{r}
 
@@ -274,7 +281,7 @@ clean_edges_with_dyad_id <- clean_edges_no_dash %>%
 clean_edges_with_dyad_id %>% slice_sample(n=15)
 ```
 
-I want to see how many unique values we have, and how many times we saw them, and where. We have ~600 observations, and 215 distinct dyads
+I want to see how many unique values we have, and how many times we saw them, and where. We have \~600 observations, and 215 distinct dyads
 
 ```{r}
 weighted_edges <- clean_edges_with_dyad_id %>% 
@@ -288,7 +295,6 @@ weighted_edges <- clean_edges_with_dyad_id %>%
 head(weighted_edges)
 ```
 
-
 ## Basic analysis
 
 Build a dataframe that can be used by statnet:
@@ -299,8 +305,7 @@ edges_for_network <- weighted_edges %>%
 head(edges_for_network)
 ```
 
-We have the data separated by site, and I am not fully sure that's they way, but I suspect it might be relevant. Specially given we had two animals banded the same but in different sites. 
-Start with the site that has most obsevations, then repeat?
+We have the data separated by site, and I am not fully sure that's they way, but I suspect it might be relevant. Specially given we had two animals banded the same but in different sites. Start with the site that has most obsevations, then repeat?
 
 ```{r}
 # 1. Build the network object
@@ -332,14 +337,21 @@ cat("Average degree:", mean(igraph::degree(hacienda_network)), "\n")
 
 The network included 82 birds forming 166 unique associations. Birds were selective in their social partners, with each individual associating with an average of only 4 others out of the 81 possible companions. The low network density (0.05) indicates that palmchats do not mix freely across the entire population, but rather maintain specific social connections.
 
-
-Next: What's the range of degrees? Some birds might be very social while others are peripheral
+Well, now I have another question. I see this and recognize some band_ids that have only 3 letters and wondering if that is ok or they are mistakes:
 
 ```{r}
+
+
+#Next: What's the range of degrees? Some birds might be very social while others are peripheral
+
+write.csv(clean_edges_hacienda, "PalmchatEdges.csv")
+
 # With igraph:
 deg <- igraph::degree(hacienda_network)
 cat("Degree range:", min(deg), "to", max(deg), "\n")
 cat("Median degree:", median(deg), "\n")
+
+sort(deg)
 
 # Look at the distribution
 hist(deg, breaks = 20,
@@ -352,7 +364,6 @@ head(sort(deg, decreasing = TRUE), 10)
 ```
 
 "Hub" birds with many connections. The degree distribution was right-skewed, with most birds maintaining only 1-3 social connections while a few individuals associated with 10 or more others. This pattern suggests that most palmchats have small, selective social circles, with a handful of highly connected individuals potentially acting as bridges between groups. This skewed distribution is consistent with modular social structure rather than random mixing—if birds associated indiscriminately across the population, we would expect a more symmetrical distribution centered around the mean degree of 4.
-
 
 ## Modularity analysis
 
@@ -382,10 +393,13 @@ The Louvain algorithm detects communities (groups) in the network by iteratively
 
 This detected 12 distinct social groups (sizes 2-14 birds) with exceptionally high modularity (0.74), indicating clearly defined community structure. The clustering coefficient was 6.4 times higher than random expectation, meaning birds sharing mutual associates were highly likely to associate themselves, so pointing towards tight-knit social groups where "friends of friends" tend to be friends. These results show that palmchats maintain organized, non-random social relationships rather than mixing freely across the population.
 
-
 ```{r}
 # Group membership
 membership(comm_louvain)
+
+
+m <- membership(comm_louvain)
+m
 
 ```
 
@@ -398,7 +412,6 @@ plot(comm_louvain, hacienda_network,
      edge.width = E(hacienda_network)$weight / 2,  # scale edge width by observations
      main = "Hacienda Site")
 ```
-
 
 ```{r}
 # Generate random networks with same degree distribution
@@ -444,25 +457,26 @@ text(x = observed_mod, y = par("usr")[4] * 0.9,
      pos = 4, col = "red")
 
 ```
-Permutation tests (1,000 iterations) confirmed that the observed social structure was highly non-random. The observed modularity (0.74) was significantly higher than expected by chance (mean null = 0.44, z = 23.76, p < 0.001), with none of the randomized networks approaching the modularity of the actual palmchat network.
 
-
+Permutation tests (1,000 iterations) confirmed that the observed social structure was highly non-random. The observed modularity (0.74) was significantly higher than expected by chance (mean null = 0.44, z = 23.76, p \< 0.001), with none of the randomized networks approaching the modularity of the actual palmchat network.
 
 ::: note
-Rick, next steps are to repeat these analyses with the other site. You also mentioned doing it by season, so you could try separating the data by season and comparing the results. 
+Rick, next steps are to repeat these analyses with the other site. You also mentioned doing it by season, so you could try separating the data by season and comparing the results.
 :::
 
 # Adding attributes
 
-Trying to answer 
+Trying to answer
 
-2) Understanding Predictors of Social Structure:
+2)  Understanding Predictors of Social Structure:
 
 · What drives the patterns of social associations in palmchat networks? (eg., are birds more likely to be connected in the network or belong to the same social group if they have certain characteristics)?
 
 · Do birds from the same nest belong to the same social group? (answer here will likely be yes).
 
 · Do social groups typically have more males than females?
+
+# Attributes
 
 Let's take a look at the attributes associated with each bird, in the raw banding data: Clean out the recaptures first
 
@@ -478,7 +492,7 @@ rawdata %>%
 
 ```
 
-These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site. (we did)
+# These are the banding errors. Which we can probably keep since they are in different sites. So, recommendation, keep in mind when doing the network analysis, to do it by site. (we did)
 
 ```{r}
 rawdata %>% 
@@ -514,36 +528,231 @@ Filter to hacienda to join with the network above:
 # Get the bird ids from the hacienda network
 hacienda_ids <- V(hacienda_network)$name
 
+hacienda_ids
+
 attributes_clean %>% 
   filter(location == "Hacienda") # 129 banded/captured
 
-hacienda_attributes <- attributes_clean %>% 
-  filter(colors %in% hacienda_ids) 
-# %>%
-#   filter(location == "Hacienda")
 # We have a mismatch, or perhaps an error here
 # The ids recovered from the hacienda observations seem to match birds initially captured in corales, which tells me we probably can't differentiate between those birds that were duplicated with the bands
 
-attribute_ids <- hacienda_attributes_clean$colors
+
+hacienda_attributes <- attributes_clean %>% 
+  filter(!(colors == "RBBM" & location == "Corales")) %>%
+  filter(!(colors == "GBBM" & location == "Corales_Entrance")) %>% 
+  filter(colors %in% hacienda_ids) 
+
+
+
+write.csv(hacienda_attributes, "Attributes.csv")
+
+
+attribute_ids <- hacienda_attributes$colors
 missing_birds <- setdiff(hacienda_ids, attribute_ids)
 # Why do we have missing birds from the attribute?
 
-hacienda_edges %>% 
-  filter(ID1 %in% missing_birds | ID2 %in% missing_birds)
-# These are just once, there must be an observation error. 
+# fixed this in raw data
+
+# GSSM
+# SGRM
+
+# let's remove two irrelevant birds from the attribute dataset, the birds with duplicate band colors (only the Hacienda ones show up in the social data):
 
 
 
-# This needs to be cleaned but I'm not sure how to decide
-# now it also makes me wonder if making the analysis by site is ideal or not
 
-hacienda_ids %in% hacienda_attributes$colors
-hacienda_ids[46]
-# This one was observed but is missing from the captures
-hacienda_attributes %>% filter(colors == "GSSM")
+hacienda_attributes$colors
+
+hacienda_ids_sorted <- sort(hacienda_ids)
+hacienda_ids_sorted
+
+attribute_ids_sorted <- sort(hacienda_attributes$colors)
+attribute_ids_sorted
+
+
 ```
 
+Let's make a Corales network:
+
+```{r}
+corales_edges <- edges_for_network %>% 
+  filter(Site == "Corales") %>%
+  ungroup() %>%
+  select(-Site) 
+
+
+# Build the network - use igraph first
+corales_network <- graph_from_data_frame(
+  d = corales_edges[, c("ID1", "ID2", "weight")], 
+  directed = FALSE
+)
+```
+
+Let's check the data for the Corales site, to see if the network associations there match up with the attribute data the way that they should:
+
+```{r}
+# # Get the bird ids from the hacienda network
+corales_ids <- V(corales_network)$name
+
+corales_ids
+
+corales_attributes <- attributes_clean %>% 
+  filter(location == "Corales")
+
+# let's filter out the problematic IDs from the dataset, so we don't have to worry about them:
+
+
+corales_attributes_ids <- corales_attributes %>% 
+   filter(colors != "WWGM") %>%
+  filter(colors %in% corales_ids) 
+
+
+corales_ids_sorted <- sort(corales_ids)
+corales_ids_sorted
+
+corales_attribute_ids_sorted <- sort(corales_attributes_ids$colors)
+corales_attribute_ids_sorted
+
+
+```
+
+## Basic analysis
+
+We have the data separated by site, and I am not fully sure that's they way, but I suspect it might be relevant. Specially given we had two animals banded the same but in different sites. Start with the site that has most obsevations, then repeat?
+
+```{r}
+
+# Build the network - use igraph first
+corales_network <- graph_from_data_frame(
+  d = corales_edges[, c("ID1", "ID2", "weight")], 
+  directed = FALSE
+)
+
+# Check if weight was loaded
+# E(hacienda_network)$weight # It was
+
+# Basic network properties
+cat("Number of birds:", vcount(corales_network), "\n")
+cat("Number of unique dyads:", ecount(corales_network), "\n")
+cat("Network density:", edge_density(corales_network), "\n")
+cat("Average degree:", mean(igraph::degree(corales_network)), "\n")
+
+```
+
+The network included 34 birds forming 47 unique associations. The low network density (0.08) indicates that palmchats do not mix freely across the entire population, but rather maintain specific social connections.
+
+```{r}
+
+#Next: What's the range of degrees? Some birds might be very social while others are peripheral
+
+# With igraph:
+deg <- igraph::degree(corales_network)
+cat("Degree range:", min(deg), "to", max(deg), "\n")
+cat("Median degree:", median(deg), "\n")
+
+# Look at the distribution
+hist(deg, breaks = 20,
+     main = "Distribution of Social Connections",
+     xlab = "Number of associates per bird",
+     ylab = "Number of birds")
+
+# Who are the most connected birds?
+head(sort(deg, decreasing = TRUE), 10)
+```
+
+## Modularity analysis
+
+```{r}
+# Community detection
+# ?cluster_louvain
+comm_louvain <- cluster_louvain(corales_network, weights = E(corales_network)$weight)
+
+# Key metrics
+cat("Modularity:", modularity(comm_louvain), "\n")
+cat("Number of groups detected:", length(comm_louvain), "\n")
+
+# Group sizes
+group_sizes <- sort(sizes(comm_louvain), decreasing = TRUE)
+print(group_sizes)
+
+# Clustering coefficient
+obs_clustering <- transitivity(corales_network, type = "global")
+random_expected <- edge_density(corales_network)
+
+cat("Observed clustering coefficient:", round(obs_clustering, 3), "\n")
+cat("Expected if random:", round(random_expected, 3), "\n")
+cat("Ratio (obs/expected):", round(obs_clustering / random_expected, 2), "x\n")
+```
+
+The Louvain algorithm detects communities (groups) in the network by iteratively optimizing modularity, which is a measure of how well the network divides into densely connected subgroups with sparse connections between them. The algorithm identifies groups where birds associate more frequently with each other than expected by chance.
+
+This detected 7 distinct social groups (sizes 2-7 birds) with exceptionally high modularity (0.72), indicating clearly defined community structure. The clustering coefficient was 4.16 times higher than random expectation, meaning birds sharing mutual associates were highly likely to associate themselves, so pointing towards tight-knit social groups where "friends of friends" tend to be friends. These results show that palmchats maintain organized, non-random social relationships rather than mixing freely across the population.
+
+```{r}
+# Group membership
+membership(comm_louvain)
+
+```
+
+```{r}
+# Basic visualization colored by group
+# You can do fancier with ggraph
+plot(comm_louvain, corales_network,
+     vertex.size = 5,
+     vertex.label = NA,
+     edge.width = E(hacienda_network)$weight / 2,  # scale edge width by observations
+     main = "Corales Site")
+```
+
+```{r}
+# Generate random networks with same degree distribution
+n_permutations <- 1000
+null_modularity <- numeric(n_permutations)
+
+for(i in 1:n_permutations) {
+  # Randomly permute edges while keeping degree sequence
+  random_net <- rewire(corales_network, keeping_degseq(niter = ecount(corales_network) * 10))
+  random_comm <- cluster_louvain(random_net, weights = E(random_net)$weight)
+  null_modularity[i] <- modularity(random_comm)
+}
+
+# Compare observed to null
+observed_mod <- modularity(comm_louvain)
+# What proportion of random networks had modularity >= observed?
+p_value <- mean(null_modularity >= observed_mod)
+# Calculate z-score for effect size assuming normal dist
+z_score <- (observed_mod - mean(null_modularity)) / sd(null_modularity)
+
+# Report results
+cat("Observed modularity:", round(observed_mod, 4), "\n")
+cat("Mean null modularity:", round(mean(null_modularity), 4), "\n")
+cat("SD null modularity:", round(sd(null_modularity), 4), "\n")
+cat("Z-score:", round(z_score, 2), "\n")
+cat("P-value:", p_value, "\n")
+
+# Visualize
+hist(null_modularity, breaks = 30, 
+     main = "Modularity: Observed vs. Random Networks",
+     xlab = "Modularity",
+     col = "lightgray",
+     xlim = range(c(null_modularity, observed_mod)))
+abline(v = observed_mod, col = "red", lwd = 3)
+abline(v = mean(null_modularity), col = "blue", lwd = 2, lty = 2)
+legend("topright", 
+       c("Observed", "Null mean"), 
+       col = c("red", "blue"), 
+       lwd = c(3, 2), 
+       lty = c(1, 2))
+text(x = observed_mod, y = par("usr")[4] * 0.9, 
+     labels = paste0("Z = ", round(z_score, 2)), 
+     pos = 4, col = "red")
+
+```
+
+Permutation tests (1,000 iterations) confirmed that the observed social structure was highly non-random. The observed modularity (0.72) was significantly higher than expected by chance (mean null = 0.49, z = 9.68, p \< 0.001), with none of the randomized networks approaching the modularity of the actual palmchat network.
+
 We have some mismatches and things to clean here:
+
 ```{r}
 # Check what "empty" cells actually contain
 unique(hacienda_attributes$molecular_sex)
@@ -584,8 +793,7 @@ sum(is.na(hacienda_attributes_clean$nest_affiliation_2024))
 sum(is.na(hacienda_attributes_clean$entrance_affiliation_based_on_videos_2024))
 ```
 
-We can't include the entrance affiliation, not enough data, we are missing 51/82. So need to incorporate this into your results as a descriptive result for the ~30 data points. For the other two variables we can include since we've got 60 and 80% of the birds with data on them. 
-
+We can't include the entrance affiliation, not enough data, we are missing 51/82. So need to incorporate this into your results as a descriptive result for the \~30 data points. For the other two variables we can include since we've got 60 and 80% of the birds with data on them.
 
 ```{r}
 # Check for duplicate birds
@@ -597,11 +805,6 @@ cat("Birds appearing multiple times:", length(dup_birds), "\n")
         select(colors, year, month, day, location, nest_affiliation_2024, molecular_sex) %>%
         arrange(colors))
 ```
-
-
-
-
-
 
 ```{r}
 
@@ -674,7 +877,6 @@ vertexnames
 set.vertex.attribute(network,"Sex", dfjoined$Molecular_Sex)
 
 get.vertex.attribute(network,"Sex")
-
 
 
 ```
