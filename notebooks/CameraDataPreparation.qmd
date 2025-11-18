@@ -8,6 +8,7 @@ editor: visual
 library("tidyverse")
 library("dplyr")
 library("ggplot2")
+library("janitor")
 
 # This analysis will look at the camera data filming palmchats entering, exiting,
 # and building at their nests. The dataset describes palmchat behavior at
@@ -17,13 +18,11 @@ library("ggplot2")
 # and insects to the nest to provision chicks. Behaviors were recorded as both
 # point and state events (eg. some are discrete events and some have a time duration associated with them)
 # using the behavioral coding software BORIS. I am interested in studying helping
-# behavior by nest helpers in this species (most nest entrances have multiple birds
+# behavior by nest helpers in this species (nest entrances often have multiple birds
 # that are seen cooperatively bringing food to the same nest entrance).
 # How are parental responsibilities shared between multiple individuals and helpers?
 # Are individuals cooperating at the nest dividing responsibilities or sharing them equally?
 ```
-
-\
 
 ```{r}
 # read in the behavioral data from the camera footage:
@@ -32,17 +31,13 @@ Behavior_data <- read.csv("../rawdata/Palmchat_Observations_All_Oct_20_2025.csv"
 
 str(Behavior_data)
 
-
+# We need a column for the total duration of each individual filming session.
 # create new column with "media duration" fixed, now in summed-up format:
 
 split_values <- strsplit(Behavior_data$Media.duration..s., split =";")
 split_values <- sapply(split_values, as.numeric)
 Behavior_data <- Behavior_data %>% mutate(Duration = sapply(split_values, sum))
 
-# behaviors include the following:
-
-# point behaviors: arrive, enter, exit, depart, stickcarry, peck, allofeed (only observed once), provision
-# state behaviors: build, visible, preen
 ```
 
 ```{r}
@@ -53,22 +48,30 @@ Behavior_data <- Behavior_data %>% mutate(Duration = sapply(split_values, sum))
 
 Camera_data <- read.csv("../rawdata/FoscamCameraScheduleCodedNew.csv")
 
-# now, join the Camera data with the Behavioral data by column "Observation.id":
+# now, join the Camera data with the Behavioral data by column "Observation.id"
+# Now we have info on nest ID added into our behavior data:
 
 Palmchat_Behavior_Data <- left_join(Behavior_data, Camera_data, by = "Observation.id")
 
+
+# Let's make a new column for morning/evening, telling us the Time of Day of the observation (which is already in the data as part of the Observation.id name):
+
+Palmchat_Behavior_Data <- Palmchat_Behavior_Data %>% mutate(Time_of_Day = case_when(
+  str_detect(Observation.id,"Ev")  ~ 'Evening',
+  str_detect(Observation.id, "Mor") ~ 'Morning',
+  TRUE ~ 'NO'))
+  
 
 ```
 
 ```{r}
 # so far, we have the behavioral observations, but we don't have any data on the attributes
-# of the specific individual birds (other than their band combos). Let's load the attribute data.
+# of the specific individual birds (other than their band combos). Let's load the bird attribute data.
 
 rawdata <- read.csv("../rawdata/PalmchatBandingDataAll.csv")
 
 
-# let's clean these so we can join them:
-
+# let's clean these so we can join them (same exact way that we did for the network data):
 
 attributes <- rawdata %>% 
   filter(Status == "N")
@@ -86,7 +89,7 @@ attributes_clean <- attributes_clean %>%
   filter(!(colors == "GBBM" & location == "Corales_Entrance"))
 
 
-### or for just Hacienda...
+### or, if we want, for just Hacienda...
 
 ## attributes_clean %>% 
  # filter(location == "Hacienda")
@@ -110,9 +113,9 @@ unique(Palmchat_Behavior_Data$Subject)
 
 compare <- setdiff(unique(Palmchat_Behavior_Data$Subject),attributes_clean$colors)
 
-
-
 compare
+
+# Looking good... just 1 discrepancy that I will fix below, and some UNID/ unbanded to remove if we want
 
 Palmchat_Behavior_Data_cleaned <- Palmchat_Behavior_Data %>% 
   filter(!(Subject == "Chick1")) %>%
@@ -126,63 +129,63 @@ Palmchat_Behavior_Data_cleaned <- Palmchat_Behavior_Data %>%
 
 unique(Palmchat_Behavior_Data_cleaned$Subject)
 
+
+# there were a few names that were coded wrong in the original behavior data (for convenience I kept the wrong names in the RAW data, since named entries in the BORIS project couldn't be easily updated), so we need to fix these here.
+
 Palmchat_Behavior_Data_cleaned <- Palmchat_Behavior_Data_cleaned %>% mutate(Subject = str_replace(Subject, "SYWM", "SWYM"))
 
+Palmchat_Behavior_Data_cleaned <- Palmchat_Behavior_Data_cleaned %>% mutate(Subject = str_replace(Subject, "RSRM", "RSWM"))
+
+Palmchat_Behavior_Data_cleaned <- Palmchat_Behavior_Data_cleaned %>% mutate(Subject = str_replace(Subject, "RYBM", "RYYM"))
+
+
+compare <- setdiff(unique(attributes_clean$colors), Palmchat_Behavior_Data_cleaned$Subject)
 
 compare <- setdiff(unique(Palmchat_Behavior_Data_cleaned$Subject),attributes_clean$colors)
 
-compare <- setdiff(unique(attributes_clean$colors),Palmchat_Behavior_Data_cleaned$Subject)
 
 compare
 
 ### looks good, looks like we're ready to join the attributes now!
 
 
-attributes_clean <- attributes_clean %>% rename(Subject = colors)
+attributes_clean2 <- attributes_clean %>% rename(Subject = colors)
 
 
-Behavior_Data <- inner_join(attributes_clean, Palmchat_Behavior_Data_cleaned, by = "Subject")
+Behavior_Data <- inner_join(attributes_clean2, Palmchat_Behavior_Data_cleaned, by = "Subject")
+
+### Let's remove useless columns to make things clearer:
+
+Behavior_Data <- Behavior_Data %>% select(year, month, day, Subject, location, molecular_sex, body_mass, unflt_wing, age, entrance = entrance_affiliation_based_on_videos_2024, nest_affiliation_2024, Observation.id, Time.offset..s., Behavior, Modifier..1, Behavior.type, Start..s., Stop..s., Duration..s., Duration, Camera, Nest, Nest.Entrance, Time_of_Day)
+
 
 write.csv(Behavior_Data, "../processed_data/Behavior_data.csv")
 
+##### Now we have most of the data we will want for analysis in one place, the "Behavior_Data" data frame
 
 ```
 
 ```{r}
-# In this data, we have two ways we have classified birds to a home nest: one is my 
-# behavioral observations in the field, and the other is based on the cameras and
-# which bird is entering on camera
 
 # Nests have multiple entrances, each with a separate group of birds living in it,
 # like a apartment complex. Therefore, birds can share the same "nest ID" and belong to
 # nest 2, but have different entrance IDs (eg. one bird might belong to Nest 2 E while 
 # another is at Nest 2 W)
 
-# Let's assign a specific entrance ID to each bird based on which nest they
-# were filmed at on the cameras:
+# Before analyzing data I want to check that each bird is assigned to the right entrance ID
+# Let's check what entrance ID each bird is showing up at based on where they
+# were filmed visiting on the cameras.
 
-## entrances <- Palmchat_Behavior_Data %>% group_by(Subject) %>%
-#  summarise(Entrance = Nest.Entrance[[1]])
+entrances <- Behavior_Data %>% group_by(Subject) %>%
+summarise(Entrance = Nest.Entrance[[1]])
 
-# why missing values??
-```
+# Looks good. I have manually updated the entrance IDs in the attributes table so that all the birds' affiliations are represented.
+# Sometimes there are discrepancies with the entrances seen here and the ones found on
+# the attributes dataset, I think this is because sometimes a bird was recorded on a camera # sitting beside a different entrance than the one it primarily attends. Since these birds
+# usually aren't entering or helping when they are sighted at a different nest entrance,
+# I think we can ignore these instances/discrepancies (except if we find that a bird is helping/ bringing food to multiple entrances, which is interesting).
+# We might want to filter out these observations when they are not representing visits by# birds living at the target entrance (usually just neighbors spilling over from nearby entrance)...
 
-```{r}
-######## Now we have most of the data we will want for analysis in one place.
-#### Let's start by looking at some of the behaviors in the data:
-
-
-# count number of times each individual engages in the behavior "enter":
-
-
-```
-
-```{r}
-
-# let's pick some other behaviors to tally up, eg. "arrive":
-
-behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$Subject) %>% filter(Behavior == "arrive") %>%
-  summarise(length=length(Behavior))
 ```
 
 ```{r}
@@ -195,68 +198,28 @@ behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$Subject) %>% filte
 
 ```{r}
 
-# let's say I want to choose a behavior based not just on the behavior state, but
+# Let's say I want to choose a behavior based not just on the behavior state, but
 # based on a second variable as well (eg. the modifier associated with that behavior).
-# Here is how I would do that if necessary:
+# Here is how to do that:
 
 behavior <- Behavior_Data %>% filter(Behavior == "enter",
                                      Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
                                        Modifier..1 == "with UNID")
 
-
-behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$Subject) %>% filter(Behavior =="enter",
-                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
-                                       Modifier..1 == "with UNID") %>%
-  summarise(length=length(Behavior))
-
-
-
-
-# let's plot helping by males vs. helping by females
-
-behaviorfrequency <- Behavior_Data %>% group_by(molecular_sex) %>% filter(Behavior =="enter",
-                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
-                                       Modifier..1 == "with UNID") %>%
-  summarise(length=length(Behavior))
-
-
-
-ggplot(behaviorfrequency, aes(x = molecular_sex, y = length)) + geom_bar(stat = "identity")
-
-
-
-###### let's see if males or females build more:
-
-behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$molecular_sex) %>% filter(Behavior == "build") %>%
-  summarise(duration = sum(Duration..s.), count = n(),)
-
-
-#### how about provisioning by age....
-
-behaviorfrequency <- Behavior_Data %>% group_by(age) %>% filter(Behavior =="enter",
-                                     Modifier..1 == "with fruit"| Modifier..1 == "with insect"|
-                                       Modifier..1 == "with UNID") %>%
-  summarise(length=length(Behavior))
-
-
 ```
 
 ```{r}
-# one of the "point" event variables I am interested in is how many times food is brought to the nest to feed chicks, and
-# which individuals are bringing it in. Problem is, there are multiple ways I can quantify this based on my data.
-# Provisioning events were recorded like this, with a behavior modifier: (eg.
-# "enter" with fruit; "arrive" with insect). I also sometimes recorded the behavior "provision," but only used that
-# when you could clearly see food being handed off to chicks (most times, you could just see food entering the nest). 
-# So, feeding visits could show up in the data in multiple formats,
-# including: "arrive with fruit," + "enter with fruit," or, alternatively, "arrive with fruit," + "provision fruit"
+# Some behaviors need to be defined based off of multiple different criteria in the data. One of the "point" event variables I am interested in is how many times food is brought to the nest to feed chicks. Problem is, there are multiple ways I can quantify this based on my data.
+# Provisioning (feeding) events could classified any of the following ways:
+
+# "arrive with fruit," + "enter with fruit," or, alternatively, "arrive with fruit," + "provision fruit"
 
 # let's try to deal with some of this variation in behavioral scoring by creating a new variable representing
-# every feeding visit :
+# each feeding visit:
 
 # create new "BringFood" variable in the dataset:
 
-
-Palmchat_data <- Palmchat_Behavior_Data %>% mutate(BringFood = ifelse(Behavior == "enter" &
+Palmchat_data <- Behavior_Data %>% mutate(BringFood = ifelse(Behavior == "enter" &
                                                         Modifier..1 == "with fruit"| 
                                                         Behavior == "enter" &
                                                         Modifier..1 == "with insect"|
@@ -267,8 +230,216 @@ Palmchat_data <- Palmchat_Behavior_Data %>% mutate(BringFood = ifelse(Behavior =
 ```
 
 ```{r}
-# let's count how many times each individual brings food to the nest:
+####### Let's take a look at each of the main behaviors of interest, one by one:
 
-behaviorfrequency <- Palmchat_data %>% group_by(Behavior_data$Subject) %>% filter(BringFood == "BringFood") %>%
+# Nest Building ("state" behavior with time duration): bird builds with sticks
+
+# Nest Provisioning ("point" behavior): bird brings food to nest entrance
+
+# Nest Visiting, "Arrive" ("point" behavior): bird arrives/departs at nest
+
+# Nest Entering ("point" behavior): bird enters the nest entrance (related to nest provisioning, but more inclusive, because I didn't have to see food going in)
+
+# Nest Cleaning: ("point" behavior): bird exits nest carrying waste (whether fecal sack or discarded fruit). Usually occurs right after a nest provisioning visit.
+
+
+##### uncommon behaviors:
+
+# Peck ("point" behavior)
+
+# Allofeed ("point" behavior)
+
+```
+
+```{r}
+# Let's see how much data we have in total in terms of sampling effort:
+
+# Filming sessions per nest:
+
+Sessions <- Behavior_Data %>% group_by(Behavior_Data$Nest) %>% 
+  summarise(distinct = n_distinct(Observation.id))
+  
+ggplot(Sessions, aes(x = Sessions$`Behavior_Data$Nest`, y = distinct)) +
+  geom_bar(stat="identity") + coord_flip()
+
+# Filming sessions per entrance:
+
+Sessions <- Behavior_Data %>% group_by(Behavior_Data$Nest.Entrance) %>% 
+  summarise(distinct = n_distinct(Observation.id))
+
+Sessions <- Sessions %>% rename(Nest_Entrance = "Behavior_Data$Nest.Entrance") %>% rename(Number_of_Sessions = "distinct")
+
+
+ggplot(Sessions, aes(x = Nest_Entrance, y = Number_of_Sessions)) +
+  geom_bar(stat="identity") + coord_flip()
+
+# Time cameras ran during each filming session/at each nest:
+
+Durations <- Behavior_Data %>% group_by(Behavior_Data$Nest) %>% distinct(Duration)
+
+SamplingEffort <- Durations %>% group_by(Durations$`Behavior_Data$Nest`) %>% summarise(sum = sum(Duration))
+
+SamplingEffort <- SamplingEffort %>% rename(Nest = "Durations$`Behavior_Data$Nest`") %>% rename(Duration = "sum")
+
+ggplot(SamplingEffort, aes(x = Nest, y = Duration)) +
+  geom_bar(stat="identity") + coord_flip()
+
+
+```
+
+```{r}
+
+# Let's explore each of the different behaviors
+# Nest Arrivals (by Individual):
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(Behavior == "arrive")
+
+ggplot(Palmchat_data_filtered, aes(x = Subject, y = Behavior)) +
+  geom_bar(stat="identity") + coord_flip()
+
+# How many times is each individual arriving at a nest??
+
+Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Subject) %>% summarise(length=length(Behavior))
+
+```
+
+```{r}
+# Nest arrivals (by Nest):
+# (How many obsevations of "arrive" at each nest?):
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(Behavior == "arrive")
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Nest) %>% summarise(length=length(Behavior))
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% rename(Nest ="Palmchat_data_filtered$Nest") %>% rename(Arrivals = "length")
+
+
+ggplot(Palmchat_data_filtered, aes(x = Nest, y = Arrivals)) +
+  geom_bar(stat="identity") + coord_flip()
+
+```
+
+```{r}
+# Nest arrivals (by Nest Entrance):
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(Behavior == "arrive")
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Nest.Entrance) %>% summarise(length=length(Behavior))
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% rename(Nest_Entrance = "Palmchat_data_filtered$Nest.Entrance") %>% rename(Arrivals = "length")
+
+ggplot(Palmchat_data_filtered, aes(x = Nest_Entrance, y = Arrivals)) +
+  geom_bar(stat="identity") + coord_flip()
+
+```
+
+```{r}
+
+# Nest Provisioning:
+# 623 observations of Nest Provisioning...
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(BringFood == "BringFood")
+
+ggplot(Palmchat_data_filtered, aes(x = Subject, y = BringFood)) +
+  geom_bar(stat="identity") + coord_flip()
+
+Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Subject) %>%
   summarise(length=length(Behavior))
+
+```
+
+```{r}
+
+# Nest building:
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(Behavior == "build")
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Subject) %>% summarise(duration = sum(Duration..s.))
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% rename(Subject = "Palmchat_data_filtered$Subject") %>% rename(Building_duration = "duration")
+
+
+ggplot(Palmchat_data_filtered, aes(x = Subject, y = Building_duration)) +
+  geom_bar(stat="identity") + coord_flip()
+
+```
+
+```{r}
+# Do males or females build more at the nest?
+  
+#### building by sex
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(Behavior == "build")
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$molecular_sex) %>% summarise(duration = sum(Duration..s.))
+
+ggplot(Palmchat_data_filtered, aes(x = Palmchat_data_filtered$`Palmchat_data_filtered$molecular_sex`, y = duration)) + geom_bar(stat="identity")
+
+
+###### let's see if males or females build more:
+
+behaviorfrequency <- Behavior_Data %>% group_by(Behavior_Data$molecular_sex) %>% filter(Behavior == "build") %>%
+  summarise(duration = sum(Duration..s.), count = n(),)
+
+```
+
+```{r}
+# let's plot helping by males vs. helping by females
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(BringFood == "BringFood")
+
+Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$molecular_sex) %>%
+  summarise(length=length(Behavior))
+
+ggplot(Palmchat_data_filtered, aes(x = molecular_sex, y = BringFood)) + geom_bar(stat = "identity")
+```
+
+```{r}
+#### how about provisioning by age....
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(BringFood == "BringFood")
+
+Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$age) %>%
+  summarise(length=length(Behavior))
+
+ggplot(Palmchat_data_filtered, aes(x = age, y = BringFood)) + geom_bar(stat = "identity")
+
+```
+
+```{r}
+### How about morning vs. evening?
+
+Palmchat_data_filtered <- Palmchat_data %>% filter(BringFood == "BringFood")
+
+Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Time_of_Day) %>%
+  summarise(length=length(Behavior))
+
+ggplot(Palmchat_data_filtered, aes(x = Time_of_Day, y = BringFood)) + geom_bar(stat = "identity")
+
+# But keep in mind filming times likely longer in the morning, so we will want to have filming duration in the model...
+
+```
+
+```{r}
+
+# Let's see the behavior plotted by nest:
+
+ggplot(Palmchat_data_filtered, aes(x = Nest, y = BringFood)) +
+  geom_bar(stat="identity")
+
+# Let's see how time influences the behavior (time of day of filming is in seconds):
+
+
+data_binned <- Palmchat_data_filtered %>%
+      mutate(value_range = cut(Start..s.,
+                               breaks = c(0, 20000, 25000, 30000, 35000, 40000, 60000, 80000, 100000),
+                               labels = c("0-20000", "20000-25000", "25000-30000", "30000-35000", "35000-40000", "40000-60000", "60000-80000", "80000-100000"),
+                               right = TRUE))
+
+ggplot(data_binned, aes(x = value_range)) +
+          geom_bar(fill = "steelblue") +
+          labs(title = "Count of Values in Binned Ranges",
+               x = "Value Range",
+               y = "Count") +
+          theme_minimal()
 ```
