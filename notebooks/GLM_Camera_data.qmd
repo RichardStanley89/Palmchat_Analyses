@@ -33,7 +33,7 @@ library(stringr)
 
 
 
-Behavior_Data <- read.csv("../rawdata/Behavior_data.csv")
+Behavior_Data <- read.csv("../processed_data/Behavior_data.csv")
 
 unique(Behavior_Data$Subject)
 
@@ -44,9 +44,13 @@ unique(Behavior_Data$Subject)
 # aggregate the observation ID:
 
 data <- Behavior_Data %>% group_by(Behavior_Data$Observation.id) %>%
-  summarise(length= length(Behavior))
+  summarise(length= length(Behavior_Data$Behavior))
 
-# 
+# Videos are a random effect (video idea) GLMMs
+
+# fixed: things you think think are actually impacting the behavior (your hypotheses)
+
+# random: things 
 
 
 ggplot(data, aes(x = length)) +
@@ -66,7 +70,7 @@ ggplot(behaviorfrequency, aes(x = length)) +
   geom_histogram(binwidth = 1)
 
 
-#### Caluculate duration of Camera recordings by year...
+#### Calculate duration of Camera recordings by year...
 
 behaviorfrequency <- Behavior_Data %>% filter(grepl("2025", Observation.id))
 behaviorfrequency <- Behavior_Data %>% filter(grepl("2024", Observation.id))

@@ -9,6 +9,7 @@ library("tidyverse")
 library("dplyr")
 library("ggplot2")
 library("janitor")
+library("lme4")
 
 # This analysis will look at the camera data filming palmchats entering, exiting,
 # and building at their nests. The dataset describes palmchat behavior at
@@ -27,7 +28,8 @@ library("janitor")
 ```{r}
 # read in the behavioral data from the camera footage:
 
-Behavior_data <- read.csv("../rawdata/Palmchat_Observations_All_Oct_20_2025.csv")
+Behavior_data <- read.csv("../rawdata/Palmchat_Behavior_Data_Nov_15_2025.csv") %>%
+  mutate(Observation.id = str_replace(Observation.id, "_Morn","_Mor"))
 
 str(Behavior_data)
 
@@ -50,6 +52,9 @@ Camera_data <- read.csv("../rawdata/FoscamCameraScheduleCodedNew.csv")
 
 # now, join the Camera data with the Behavioral data by column "Observation.id"
 # Now we have info on nest ID added into our behavior data:
+
+
+
 
 Palmchat_Behavior_Data <- left_join(Behavior_data, Camera_data, by = "Observation.id")
 
@@ -326,6 +331,13 @@ Palmchat_data_filtered <- Palmchat_data %>% filter(Behavior == "arrive")
 
 Palmchat_data_filtered <- Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Nest.Entrance) %>% summarise(length=length(Behavior))
 
+
+# Observation: an individual at a nest entrance: so....
+
+Palmchat_data_filtered <- Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Nest.Entrance) %>% Palmchat_data_filtered$ summarise(length=length(Behavior))
+
+
+
 Palmchat_data_filtered <- Palmchat_data_filtered %>% rename(Nest_Entrance = "Palmchat_data_filtered$Nest.Entrance") %>% rename(Arrivals = "length")
 
 ggplot(Palmchat_data_filtered, aes(x = Nest_Entrance, y = Arrivals)) +
@@ -346,6 +358,8 @@ ggplot(Palmchat_data_filtered, aes(x = Subject, y = BringFood)) +
 Palmchat_data_filtered %>% group_by(Palmchat_data_filtered$Subject) %>%
   summarise(length=length(Behavior))
 
+
+Palmchat_data %>% distinct(Subject,Nest) %>% drop_na()
 ```
 
 ```{r}
@@ -442,4 +456,29 @@ ggplot(data_binned, aes(x = value_range)) +
                x = "Value Range",
                y = "Count") +
           theme_minimal()
+```
+
+```{r}
+
+
+
+unique(Palmchat_data$BringFood)
+
+model_data <- Palmchat_data %>% mutate(BringFood = ifelse(BringFood == "BringFood", 1,0)) %>% 
+  mutate(c_date = paste(year, month, day, sep = "-"), .after=day) %>% 
+  mutate(c_date = lubridate::ymd(c_date)) %>% 
+  mutate(julian_date = lubridate::yday(c_date), .after=day)
+
+
+glm(formula = BringFood ~ molecular_sex, data = model_data, family = binomial(link = "logit"))
+
+glmer(formula = BringFood ~ molecular_sex + julian_date + location + age + (1|Nest/entrance), 
+      data = model_data, 
+      family = binomial(link = "logit"))
+
+glmer(formula = BringFood ~ julian_date + body_mass + unflt_wing + Duration + (1|Nest/entrance), 
+      data = model_data, 
+      family = binomial(link = "logit"))
+
+
 ```

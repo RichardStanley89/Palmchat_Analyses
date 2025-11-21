@@ -4,11 +4,11 @@
 library(ggplot2)
 library(gridExtra)
 
-my_function1 <- function(x) {
+my_function <- function(x) {
   x
 }
 
-my_function2 <- function(x) {
+my_function <- function(x) {
   -x
 }
 
@@ -35,6 +35,12 @@ grid.arrange(p,p2)
 
 
 library(igraph)
+
+
+g_gnm <- sample_gnm(n = 100, m = 400) # 100 nodes, 400 edges
+plot(g_gnm, vertex.size = 5, vertex.label = NA)
+
+
 
 g <- erdos.renyi.game(100, 200, type = "gnm", directed = FALSE)
 plot(g, vertex.size = 5, vertex.label = NA)
