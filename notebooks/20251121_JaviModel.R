@@ -127,6 +127,8 @@ model <- glmer(n ~ tod + (1|Subject) + offset(log_effort),
       data = F,
       family = poisson)
 
+# Check significance
+summary(model)
 
 library(DHARMa)
 
