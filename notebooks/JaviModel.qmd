@@ -1,0 +1,547 @@
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+```{r}
+
+library(dplyr)
+library(tidyverse)
+library(lme4)
+library(ggplot2)
+library(sjPlot)
+
+# Let's start by modeling the frequency of behavior events for each individual.
+
+D <- read.csv("../processed_data/Behavior_data.csv")
+
+# There are a few cases where birds appear at nest entrances that are not theirs (eg., they are actually visiting the adjacent nest, but I coded them in the footage anyway because I could see them on the cameras. Let's filter these cases out.)
+
+D <- D %>% mutate(value = case_when(
+  Nest.Entrance == 'Nest_2NW' & Subject == 'YGGM'~ 'YES',
+   Nest.Entrance == 'Nest_1SE' & Subject == 'GBBM'~ 'YES',
+   Nest.Entrance == 'Cajuil_E' & Subject == 'GWRM'~ 'YES',
+   Nest.Entrance ==  'Nest_1NE' & Subject == 'RBWM'~ 'YES',
+   Nest.Entrance ==  'Guayaba_E' & Subject == 'RGWM'~ 'YES',
+   Nest.Entrance ==  'Nest_2SE' & Subject == 'RYWM'~ 'YES',
+   Nest.Entrance ==  'Nest_2NW' & Subject == 'SGSM'~ 'YES',
+   Nest.Entrance ==  'BigNest_A' & Subject == 'SRMR'~ 'YES',
+  Nest.Entrance ==  'BigNest_C' & Subject == 'GGYM'~ 'YES',
+   Nest.Entrance ==  'Nest_1SE' & Subject == 'WYSM'~ 'YES',
+   Nest.Entrance ==   'BigNest_A' & Subject == 'SRMR'~ 'YES',
+   TRUE ~ 'NO'))
+
+
+D <- D %>% filter(value == 'NO')
+
+# Check how things are looking...
+
+Composition <- D %>% group_by(Nest.Entrance, Subject) %>% summarise(count = n())
+
+
+# Additionally, we sometimes have footage at the same nest, but for different breeding attempts (eg. one in May and one in July). The group composition may differ between these different breeding attempts, so we should treat them independently. I will work on this later. In a few cases, the same bird appears in breeding attempts at a different nest (Eg. BGSM appears at both nest 1 and nest 3). This will have to be dealt with at some point, but for now, let's continue...
+
+
+# We could choose to aggregate the behavioral data at the level of the nest entrance or at the level of the individual. Here, we will start by looking at the individuals:
+
+# Below we will make data frames with each of the behavioral variables of interest.
+# There are a bunch of them. Let's give each behavior a different dataframe name:
+```
+
+```{r}
+# select "arrive" behavior as response variable.
+
+Arrive <- D %>% 
+  filter(Behavior == "arrive") %>% 
+  count(Observation.id, Nest.Entrance, Subject, Duration) %>% 
+  mutate(log_effort = log(Duration)) %>%
+  # mutate(log_effort = Duration) %>% 
+  mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+
+```
+
+```{r}
+# select "enter" behavior as response variable
+
+Enter <- D %>%
+  filter(Behavior == "enter") %>% 
+  count(Observation.id, Nest.Entrance, Subject, Duration) %>% 
+  mutate(log_effort = log(Duration)) %>%
+  # mutate(log_effort = Duration) %>% 
+  mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+```
+
+```{r}
+# Select build duration as response:
+
+Effort <- D %>% filter(!duplicated(Observation.id)) %>% mutate(log_effort = log(Duration)) %>% select(Observation.id, log_effort)
+
+BuildDuration_for_join <- D %>%
+  group_by(Observation.id, Subject) %>% 
+  filter(Behavior == "build") %>%
+summarise(duration_behavior = sum(Duration..s.), count = n()) %>% 
+  mutate(tod = str_extract(Observation.id, "(Mor|Ev)$")) 
+
+BuildDuration <- inner_join(BuildDuration_for_join, Effort, by = "Observation.id")
+
+hist(log(BuildDuration$duration_behavior))
+```
+
+```{r}
+# Select "BringFood" as a response:
+
+
+ BringFood <- D %>% 
+  filter(BringFood == "BringFood") %>% 
+  count(Observation.id, Nest.Entrance, Subject, Duration) %>% 
+  mutate(log_effort = log(Duration)) %>%
+  # mutate(log_effort = Duration) %>% 
+  mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+
+```
+
+```{r}
+# Now we can run the models using any of the above selections....
+
+# join filtered data with attributes:
+
+attributes_clean2 <- read.csv("../processed_data/attributes_clean2.csv")
+
+# MAKE THE SELECTION HERE:
+
+# Joined <- inner_join(attributes_clean2, Arrive, by = "Subject")
+# Joined <- inner_join(attributes_clean2, BringFood, by = "Subject")
+# Joined <- inner_join(attributes_clean2, BuildDuration, by = "Subject")
+Joined <- inner_join(attributes_clean2, Enter, by = "Subject")
+
+
+Joined <- Joined %>% mutate(molecular_sex = as.factor(Joined$molecular_sex))
+
+Joined <- Joined %>% mutate(age = as.factor(Joined$age))
+
+str(Joined)
+
+```
+
+```{r}
+# Now we can try modeling the behaviors...
+
+# Does time of day influence the "point" behavior? (point behaviors include "enter," "BringFood," "arrive")
+
+model <- glmer(n ~ tod + (1|Subject) + offset(log_effort),
+      data = Joined,
+      family = poisson)
+
+summary(model)
+
+```
+
+```{r}
+# Does time of day influence the "state" behavior?
+
+# (for state behavior, remember to select "BuildDuration"):
+Joined <- inner_join(attributes_clean2, BuildDuration, by = "Subject")
+
+ model <- glmer(log(duration_behavior) ~ tod + (1|Subject) + offset(log_effort),
+             data = Joined)
+
+ # we had discussed using this link function/distribution, but it didn't work?
+ 
+# model <- glmer(duration_behavior ~ tod + (1|Subject) + offset(log_effort),
+ #           data = Joined,
+  #           family = Gamma(link = "inverse"))
+
+model
+
+summary(model)
+```
+
+```{r}
+# Now let's add some other predictors like sex, age
+# we are also going to go back to the previous predictor, "Enter", so we have a count variable
+
+Joined <- inner_join(attributes_clean2, Enter, by = "Subject")
+
+# remove NAs to prepare molecular sex column:
+
+Joined <- Joined %>%
+     mutate(molecular_sex = na_if(molecular_sex, ""))
+
+Joined <- Joined %>% drop_na(molecular_sex)
+```
+
+```{r}
+# Does sex influence the "point" behavior?
+
+model <- glmer(n ~ molecular_sex + tod + (1|Subject) + offset(log_effort),
+               data = Joined,
+               family = poisson)
+
+
+summary(model)
+
+exp(0.2773)
+```
+
+```{r}
+# Does sex influence the state behavior? (eg. Duration)
+
+Joined <- inner_join(attributes_clean2, BuildDuration, by = "Subject")
+
+Joined <- Joined %>%
+     mutate(molecular_sex = na_if(molecular_sex, ""))
+
+Joined <- Joined %>% drop_na(molecular_sex)
+
+
+model <- glmer(duration_behavior ~ molecular_sex + (1|Subject) + offset(log_effort),
+               data = Joined,
+               family = gaussian)
+
+summary(model)
+```
+
+```{r}
+
+Joined <- inner_join(attributes_clean2, Enter, by = "Subject")
+
+# remove NAs to prepare age column (good bit of data loss because of missing ages):
+
+
+Joined <- Joined %>%
+  mutate(age = na_if(age, ""))
+
+Joined <- Joined %>% drop_na(age)
+
+
+# if we want, we could simplify "age" to "adult and "juvenile"
+# Joined <- Joined %>% mutate(age2 = case_when(age == "FCF" ~ "Immature",
+       #                                      age == "FAJ" ~ "Adult",
+       #                                      age == "juvenile" ~ "Immature",
+       #                                      age == "DCB" ~ "Adult",
+         #                                    TRUE ~ "OTHER"))
+```
+
+```{r}
+# Does age influence the point behavior?
+
+model <- glmer(n ~ age + tod + (1|Subject) + offset(log_effort),
+            data = Joined,
+            family = poisson)
+
+summary(model)
+
+```
+
+```{r}
+# Does age influence the state behavior?
+
+Joined <- inner_join(attributes_clean2, BuildDuration, by = "Subject")
+Joined <- Joined %>%
+  mutate(age = na_if(age, ""))
+
+Joined <- Joined %>% drop_na(age)
+
+
+model <- glmer(duration_behavior ~ age + (1|Subject) + offset(log_effort),
+               data = Joined,
+               family = gaussian)
+
+summary(model)
+```
+
+```{r}
+# Now let's try modeling the behavioral data with the events grouped by Nest entrance instead of by individual (eg., do larger groups have more frequent nest visits?). For this, I want to include birds that are unbanded as well, because they are important for determining group size...
+
+D <- read.csv("../processed_data/Behavior_data_unbanded.csv")
+
+# So this will be the total number of behavior events summed up, from multiple individuals, including unbanded
+
+```
+
+```{r}
+
+# As before, we will create separately named dataframes for each behavior of interest:
+
+# Enter
+
+Grouped1 <- D %>% filter(!duplicated(Observation.id))
+
+Grouped2 <- D %>% filter(Behavior == "enter") %>% group_by(Observation.id) %>% count(Behavior)
+
+D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
+
+
+###
+
+
+Enter <- D2 %>% 
+  mutate(log_effort = log(Duration)) %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+```
+
+```{r}
+
+# Arrive
+
+Grouped1 <- D %>% filter(!duplicated(Observation.id))
+
+Grouped2 <- D %>% filter(Behavior == "arrive") %>% group_by(Observation.id) %>% count(Behavior)
+
+D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
+
+Arrive <- D2 %>% 
+  mutate(log_effort = log(Duration)) %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+```
+
+```{r}
+
+# BringFood
+
+Grouped1 <- D %>% filter(!duplicated(Observation.id))
+
+Grouped2 <- D %>% filter(BringFood == "BringFood") %>% group_by(Observation.id) %>% count(BringFood)
+
+D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
+
+BringFood <- D2 %>% 
+  mutate(log_effort = log(Duration))  %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+
+```
+
+```{r}
+
+# BuildDuration
+
+Grouped1 <- D %>% filter(!duplicated(Observation.id))
+
+Grouped2 <- D %>% filter(Behavior == "build") %>% group_by(Observation.id) %>% summarise(duration_behavior = sum(Duration..s.), count = n(),)
+
+D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
+
+BuildDuration <- D2 %>% 
+  mutate(log_effort = log(Duration)) %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+
+```
+
+```{r}
+# Let's start with some plotting. Then we can do some models.
+
+# First, let's plot rates of entering vs. group size.
+# We will need: 1) entering rates for each nest entrance,
+# and 2) group sizes for each nest entrance.
+
+# First, let's get entering rates...
+
+# Let's first sum up the number of "enter" behaviors seen at each nest entrance:
+# Before, we aggregated by Observation.id. Here, I aggregated by Nest Entrance. This loses some of the separation of the data from Observation.id, but I guess is unavoidable since we probably want to look at things by NestEntrance... though I did think it might be good to have Observation.id as a random effect in the models if this is possible...
+
+Summed_by_NestE <- Enter %>% group_by(Nest.Entrance) %>% summarise(sum(n)) %>%
+  rename(y ="sum(n)")
+
+
+Data_by_Nest <- left_join(Enter, Summed_by_NestE, by = "Nest.Entrance")
+
+
+# to get rid of the redundancies in Nest Entrance counts:
+
+Data_by_Nest <- Data_by_Nest %>% filter(!duplicated(Nest.Entrance))
+
+
+```
+
+```{r}
+# Next, let's get the rate of entering per nest entrance:
+
+VisitsperNest <- Data_by_Nest %>% group_by(Nest.Entrance) %>% summarize(sum(Duration)) %>%
+  rename(Duration = "sum(Duration)")
+
+
+NestVisits <- left_join(VisitsperNest,Summed_by_NestE, by = "Nest.Entrance")
+
+
+NestVisits <- NestVisits %>% mutate(VisitationRate = (y/Duration))
+
+NestVisits <- NestVisits %>% mutate(VisitationRate_hr = VisitationRate * 3600)
+```
+
+```{r}
+# Now, let's also count number of individuals per nest entrance:
+
+# Let's do this for birds that INCLUDE unbanded
+
+# Let's do this JUST for the birds that have the BringFood variable (to make sure they are helpers, not juveniles).
+
+# First, go back and select "BringFood" dataset, then...
+
+# Let's assign unique names to the unbanded individuals, so they don't drop out when we look for unique values/aggregate by birds' names.
+# give unbanded helpers a unique name:
+
+BringFood[9,3] <- "UNBANDED1_CajuilE"
+BringFood[10,3] <- "UNBANDED2_CajuilE"
+BringFood[23,3] <- "UNBANDED1_SE"
+BringFood[25,3] <- "UNBANDED1_2A"
+BringFood[36,3] <- "UNBANDED1_3NE"
+BringFood[42,3] <- "UNBANDED1_4W"
+BringFood[43,3] <- "UNBANDED2_4W"
+BringFood[45,3] <- "UNBANDED1_4W(T)"
+BringFood[47,3] <- "UNBANDED1_5SE"
+BringFood[51,3] <- "UNBANDED1_7SE"
+
+
+Counted_groups <- D %>% filter(BringFood == BringFood) %>% group_by(Nest.Entrance) %>% summarize(count = n_distinct(Subject))
+
+# and add these numbers to our data
+
+Data <- inner_join(NestVisits, Counted_groups, by = "Nest.Entrance")
+
+# most common number of birds per nest visit
+count(Data, count) %>% arrange(desc(n))
+
+Data %>% 
+  ggplot(aes(x  = VisitationRate, y = Duration, 
+             color = factor(count))
+         # label = Nest.Entrance)
+         ) + 
+  geom_point() +
+  # geom_text() +
+  NULL -> entering_plot
+```
+
+```{r}
+# let's plot rate of entering by number of helpers:
+
+Data <- Data %>% mutate(count = as.factor(Data$count))
+
+
+ggplot(Data, aes(x = count, y = VisitationRate_hr, fill = count)) +
+  geom_boxplot()
+```
+
+```{r}
+# Let's plot the raw counts of number of times birds enter by group size:
+
+
+Data <- Data %>% mutate(count = as.factor(Data$count))
+
+count(Data, count)
+
+ggplot(Data, aes(x = count, y = y, fill = count)) +
+  geom_boxplot()
+```
+
+```{r}
+
+# Let's join attributes to this data for modeling:
+
+
+Data_by_Nest <- Data_by_Nest %>% select(-y,-Duration)
+
+NewData <- inner_join(Data_by_Nest, Data, by = "Nest.Entrance")
+
+
+# I guess we have to collapse this by Nest.Entrance for analysis...
+
+NestEntranceData <- NewData %>% filter(!duplicated(Nest.Entrance))
+
+# I had made count into a factor for the boxplots... let's make it numeric again for the model I guess?
+
+NestEntranceData <- NestEntranceData %>% mutate(count = as.numeric(NestEntranceData$count))
+
+```
+
+```{r}
+model <- glmer(y ~ count + (1|location) + offset(log_effort),
+               data = NestEntranceData,
+               family = poisson)
+
+summary(model)
+```
+
+```{r}
+exp(0.33947)
+```
+
+```{r}
+# JAvi: look into Dharma package
+library(DHARMa)
+
+testDispersion(model)
+simulationOutput <- simulateResiduals(fittedModel = model)
+residuals(simulationOutput)
+residuals(simulationOutput, quantileFunction = qnorm, outlierValues = c(-7,7))
+plot(simulationOutput)
+```
+
+```{r}
+# effect of group size on individual investment (eg., behavior per individual, rather than per nest):
+
+model <- glmer(n ~ count + (1|location) + offset(log_effort),
+               data = NestEntranceData,
+               family = poisson)
+
+summary(model)
+
+# No evidence for reduced individual investment with group size?
+```
+
+```{r}
+
+# This section was for if I wanted to test for presence or absence of a given behavior.. instead of just the behavior frequencies. Let's not worry about this for now.
+
+# create binary response: helper vs non-helper.
+
+# First, make a data set representing all the helpers....
+
+helpers <- S %>% mutate(helper = 1)
+
+helpers <- helpers %>% mutate(ID = case_when(Subject == 'UNBANDED1' ~ Nest.Entrance,
+                    Subject == 'UNBANDED2' ~ Nest.Entrance,
+                    TRUE ~ Subject))
+
+# give the unbanded helpers a unique name:
+
+helpers[10,6] <- "Cajuil_E_2"
+helpers[43,6] <- "Nest_4_W_2"
+
+# Next, make a dataset representing everybody entering... both helper and non-helper:
+
+everybody <- S2 %>% mutate(ID = case_when(Subject == 'UNBANDED1' ~ Nest.Entrance,
+                                          Subject == 'UNBANDED2' ~ Nest.Entrance,
+                                          TRUE ~ Subject))
+everybody[15,5] <- "Cajuil_E_2"
+everybody[37,5] <- "Nest_2A_2"
+everybody[42,5] <- "Nest_2NW_2"
+everybody[63,5] <- "Nest_4_W_2"
+everybody[66,5] <- "Nest_4_W(T)_2"
+
+everybody <- data.frame(everybody$ID, everybody$n, everybody$Nest.Entrance) %>% rename(ID = everybody.ID) %>%
+  rename(n = everybody.n) %>% rename(Nest.Entrance = everybody.Nest.Entrance)
+
+helpers <- data.frame(helpers$ID, helpers$helper) %>% rename(ID = helpers.ID) %>%
+  rename(helper = helpers.helper)
+```
+
+```{r}
+# Does sex influence the binary category?
+
+hist(S$helper)
+
+
+model <- glmer(helper ~ molecular_sex + (1|Subject) + offset(log_effort),
+               data = Joined,
+               family = binomial(link = "logit"))
+
+table(S$helper)
+```
+
+```{r}
+joined <- left_join(everybody, helpers, by = 'ID')
+
+joined <- joined %>% mutate(helper = replace_na(helper, 0))
+```
+
+```{r}
+
+# This is to report model findings... using sjPlot package:
+
+tab_model(model, model2)
+```
