@@ -138,6 +138,7 @@ summary(model)
 ```{r}
 # Does time of day influence the "state" behavior?
 
+
 # (for state behavior, remember to select "BuildDuration"):
 Joined <- inner_join(attributes_clean2, BuildDuration, by = "Subject")
 
@@ -191,6 +192,7 @@ Joined <- Joined %>%
      mutate(molecular_sex = na_if(molecular_sex, ""))
 
 Joined <- Joined %>% drop_na(molecular_sex)
+
 
 
 model <- glmer(duration_behavior ~ molecular_sex + (1|Subject) + offset(log_effort),
@@ -247,12 +249,41 @@ model <- glmer(duration_behavior ~ age + (1|Subject) + offset(log_effort),
                family = gaussian)
 
 summary(model)
+
+
+############################## BBBBBBBBB ##############
+
+
+
 ```
 
 ```{r}
 # Now let's try modeling the behavioral data with the events grouped by Nest entrance instead of by individual (eg., do larger groups have more frequent nest visits?). For this, I want to include birds that are unbanded as well, because they are important for determining group size...
 
 D <- read.csv("../processed_data/Behavior_data_unbanded.csv")
+
+
+# There are a few cases where birds appear at nest entrances that are not theirs (eg., they are actually visiting the adjacent nest, but I coded them in the footage anyway because I could see them on the cameras. Let's filter these cases out.)
+
+D <- D %>% mutate(value = case_when(
+  Nest.Entrance == 'Nest_2NW' & Subject == 'YGGM'~ 'YES',
+   Nest.Entrance == 'Nest_1SE' & Subject == 'GBBM'~ 'YES',
+   Nest.Entrance == 'Cajuil_E' & Subject == 'GWRM'~ 'YES',
+   Nest.Entrance ==  'Nest_1NE' & Subject == 'RBWM'~ 'YES',
+   Nest.Entrance ==  'Guayaba_E' & Subject == 'RGWM'~ 'YES',
+   Nest.Entrance ==  'Nest_2SE' & Subject == 'RYWM'~ 'YES',
+   Nest.Entrance ==  'Nest_2NW' & Subject == 'SGSM'~ 'YES',
+   Nest.Entrance ==  'BigNest_A' & Subject == 'SRMR'~ 'YES',
+  Nest.Entrance ==  'BigNest_C' & Subject == 'GGYM'~ 'YES',
+   Nest.Entrance ==  'Nest_1SE' & Subject == 'WYSM'~ 'YES',
+   Nest.Entrance ==   'BigNest_A' & Subject == 'SRMR'~ 'YES',
+   TRUE ~ 'NO'))
+
+
+D <- D %>% filter(value == 'NO')
+
+
+
 
 # So this will be the total number of behavior events summed up, from multiple individuals, including unbanded
 
@@ -274,8 +305,10 @@ D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
 ###
 
 
-Enter <- D2 %>% 
-  mutate(log_effort = log(Duration)) %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+Enter <- D2 %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+
+
+
 ```
 
 ```{r}
@@ -288,8 +321,7 @@ Grouped2 <- D %>% filter(Behavior == "arrive") %>% group_by(Observation.id) %>% 
 
 D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
 
-Arrive <- D2 %>% 
-  mutate(log_effort = log(Duration)) %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+Arrive <- D2 %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
 ```
 
 ```{r}
@@ -303,7 +335,7 @@ Grouped2 <- D %>% filter(BringFood == "BringFood") %>% group_by(Observation.id) 
 D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
 
 BringFood <- D2 %>% 
-  mutate(log_effort = log(Duration))  %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+ mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
 
 ```
 
@@ -317,8 +349,7 @@ Grouped2 <- D %>% filter(Behavior == "build") %>% group_by(Observation.id) %>% s
 
 D2 <- inner_join(Grouped1, Grouped2, by = "Observation.id")
 
-BuildDuration <- D2 %>% 
-  mutate(log_effort = log(Duration)) %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
+BuildDuration <- D2 %>% mutate(tod = str_extract(Observation.id, "(Mor|Ev)$"))
 
 ```
 
@@ -334,31 +365,21 @@ BuildDuration <- D2 %>%
 # Let's first sum up the number of "enter" behaviors seen at each nest entrance:
 # Before, we aggregated by Observation.id. Here, I aggregated by Nest Entrance. This loses some of the separation of the data from Observation.id, but I guess is unavoidable since we probably want to look at things by NestEntrance... though I did think it might be good to have Observation.id as a random effect in the models if this is possible...
 
-Summed_by_NestE <- Enter %>% group_by(Nest.Entrance) %>% summarise(sum(n)) %>%
-  rename(y ="sum(n)")
+Enter_by_nest <- Enter %>% group_by(Nest.Entrance) %>% summarize(across(c(n,Duration),sum))
+
+Arrive_by_nest <- Arrive %>% group_by(Nest.Entrance) %>% summarize(across(c(n,Duration),sum))
+  
+BringFood_by_nest <- BringFood %>% group_by(Nest.Entrance) %>% summarize(across(c(n,Duration),sum))
 
 
-Data_by_Nest <- left_join(Enter, Summed_by_NestE, by = "Nest.Entrance")
-
-
-# to get rid of the redundancies in Nest Entrance counts:
-
-Data_by_Nest <- Data_by_Nest %>% filter(!duplicated(Nest.Entrance))
-
+Data_by_Nest <- data.frame(Enter_by_nest, Arrive_by_nest$n, BringFood_by_nest$n) %>% rename(Enter = 'n', Arrive = 'Arrive_by_nest.n', BringFood = 'BringFood_by_nest.n')
 
 ```
 
 ```{r}
 # Next, let's get the rate of entering per nest entrance:
 
-VisitsperNest <- Data_by_Nest %>% group_by(Nest.Entrance) %>% summarize(sum(Duration)) %>%
-  rename(Duration = "sum(Duration)")
-
-
-NestVisits <- left_join(VisitsperNest,Summed_by_NestE, by = "Nest.Entrance")
-
-
-NestVisits <- NestVisits %>% mutate(VisitationRate = (y/Duration))
+NestVisits <- Data_by_Nest %>% mutate(VisitationRate = (Enter/Duration))
 
 NestVisits <- NestVisits %>% mutate(VisitationRate_hr = VisitationRate * 3600)
 ```
@@ -393,6 +414,12 @@ Counted_groups <- D %>% filter(BringFood == BringFood) %>% group_by(Nest.Entranc
 
 Data <- inner_join(NestVisits, Counted_groups, by = "Nest.Entrance")
 
+# remove undersampled nests:
+
+Data <- Data %>% filter(Nest.Entrance!= 'BigNest_A', Nest.Entrance!= 'BigNest_B', Nest.Entrance!= 'BigNest_E')
+
+
+
 # most common number of birds per nest visit
 count(Data, count) %>% arrange(desc(n))
 
@@ -424,7 +451,7 @@ Data <- Data %>% mutate(count = as.factor(Data$count))
 
 count(Data, count)
 
-ggplot(Data, aes(x = count, y = y, fill = count)) +
+ggplot(Data, aes(x = count, y = Enter, fill = count)) +
   geom_boxplot()
 ```
 
@@ -449,15 +476,24 @@ NestEntranceData <- NestEntranceData %>% mutate(count = as.numeric(NestEntranceD
 ```
 
 ```{r}
+## try a hierarchical model (I think in a previous version of dataset I had location in here as either Corales or Hacienda)
+
 model <- glmer(y ~ count + (1|location) + offset(log_effort),
                data = NestEntranceData,
                family = poisson)
 
 summary(model)
+
+
 ```
 
 ```{r}
-exp(0.33947)
+####### non-hierarchical model:
+
+model <- glm(BringFood ~ count + Duration,
+               data = Data,
+               family = "poisson")
+summary(model)
 ```
 
 ```{r}
