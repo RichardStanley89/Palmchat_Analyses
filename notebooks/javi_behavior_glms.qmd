@@ -1,0 +1,195 @@
+---
+title: "Palmchat behavioral models"
+author: "Javi Rudolph"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    # code-fold: true
+    embed-resources: true
+editor: source
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lme4)
+library(ggplot2)
+library(DHARMa)
+library(sjPlot)
+```
+
+
+```{r load-data}
+# Individual-level behavioral observations (banded birds only)
+behavior <- read.csv("../rawdata/Behavior_data.csv")
+
+# Same observations but including unbanded individuals
+# (used for group size counts)
+behavior_unbanded <- read.csv("../rawdata/Behavior_data_unbanded.csv")
+
+# Individual bird attributes (sex, age, etc.)
+attributes <- read.csv("../rawdata/attributes_clean2.csv")
+```
+
+
+```{r data-overview}
+glimpse(behavior)
+unique(behavior$Behavior)
+glimpse(behavior_unbanded)
+glimpse(attributes)
+```
+
+```{r data-exploration}
+# Behavior frequency table: count of events and unique birds per behavior
+behavior %>%
+  group_by(Behavior, Behavior.type) %>%
+  summarise(
+    n_events = n(),
+    n_birds = n_distinct(Subject),
+    n_sessions = n_distinct(Observation.id),
+    n_entrances = n_distinct(Nest.Entrance),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_events))
+
+# Overview of sessions, entrances and birds
+n_distinct(behavior$Observation.id)
+n_distinct(behavior$Nest.Entrance)
+n_distinct(behavior$Subject)
+
+# Average, min and max events per session
+behavior %>%
+  group_by(Observation.id) %>%
+  summarise(n_events = n()) %>%
+  summarise(
+    mean_events = mean(n_events),
+    min_events = min(n_events),
+    max_events = max(n_events)
+  )
+
+# Visualize: event counts per behavior, colored by type
+behavior %>%
+  count(Behavior, Behavior.type) %>%
+  ggplot(aes(x = reorder(Behavior, n), y = n, fill = Behavior.type)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Behavioral event counts", x = NULL, y = "Number of events", fill = "Type") +
+  theme_minimal()
+
+# Visualize: unique birds per behavior
+behavior %>%
+  group_by(Behavior) %>%
+  summarise(n_birds = n_distinct(Subject)) %>%
+  ggplot(aes(x = reorder(Behavior, n_birds), y = n_birds)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Unique birds per behavior", x = NULL, y = "Number of birds") +
+  theme_minimal()
+```
+
+```{r attribute-coverage}
+# Clean attributes: convert empty strings to NA
+attributes <- attributes %>%
+  mutate(
+    molecular_sex = na_if(molecular_sex, ""),
+    age = na_if(age, "")
+  )
+
+# How many unique birds in behavior have attribute data?
+behavior %>%
+  distinct(Subject) %>%
+  left_join(attributes %>% select(Subject, molecular_sex, age, body_mass), by = "Subject") %>%
+  summarise(
+    total_birds = n(),
+    has_sex = sum(!is.na(molecular_sex)),
+    has_age = sum(!is.na(age)),
+    has_mass = sum(!is.na(body_mass))
+  )
+
+# Which birds in behavior are missing entirely from attributes?
+behavior %>%
+  distinct(Subject) %>%
+  anti_join(attributes, by = "Subject")
+```
+
+
+
+We have 43 unique banded individuals in the behavioral dataset, all of which have a match in the attributes table. Coverage across predictor variables is not complete for all birds. Body mass is the most complete, available for 40 out of 43 birds. Molecular sex is available for 32 birds, and age for 30. This means that models including sex or age as predictors will run on reduced subsets, which is worth keeping in mind given the already modest sample sizes. No unbanded individuals were found in the banded behavioral dataset, confirming that the two datasets are cleanly separated.
+
+
+```{r clean-behavior}
+# Birds observed at nest entrances that are not their own, filtered out
+wrong_nest <- tribble(
+  ~Nest.Entrance,  ~Subject,
+  "Nest_2NW",      "YGGM",
+  "Nest_1SE",      "GBBM",
+  "Cajuil_E",      "GWRM",
+  "Nest_1NE",      "RBWM",
+  "Guayaba_E",     "RGWM",
+  "Nest_2SE",      "RYWM",
+  "Nest_2NW",      "SGSM",
+  "BigNest_A",     "SRMR",
+  "BigNest_C",     "GGYM",
+  "Nest_1SE",      "WYSM"
+)
+
+# Apply filter, join attributes, clean sex and age
+# Drop attribute columns already in behavior before joining to avoid conflicts
+behavior_clean <- behavior %>%
+  anti_join(wrong_nest, by = c("Nest.Entrance", "Subject")) %>%
+  select(-molecular_sex, -age, -body_mass) %>%
+  left_join(
+    attributes %>% select(Subject, molecular_sex, age, body_mass),
+    by = "Subject"
+  ) %>%
+  mutate(
+    molecular_sex = na_if(molecular_sex, ""),
+    age = na_if(age, ""),
+    log_duration = log(Duration)
+  )
+
+nrow(behavior_clean)
+```
+
+```{r aggregate-enter}
+# Individual x session counts of "enter" behavior
+df_enter <- behavior_clean %>%
+  filter(Behavior == "enter") %>%
+  group_by(Observation.id, Subject, Nest.Entrance, Time_of_Day, log_duration,
+           molecular_sex, age, body_mass) %>%
+  summarise(n = n(), .groups = "drop")
+nrow(df_enter)
+summary(df_enter)
+```
+
+After aggregating to the individual x session level, the enter dataset contains 128 observations. The number of entry events per bird per session ranges from 1 to 37, with a median of 5 and a mean of 6.9, indicating a right-skewed distribution consistent with count data. Seven birds are missing body mass measurements. Session duration on the log scale is fairly consistent across observations, ranging from 7.9 to 9.8, which reflects the standardized 3-hour observation protocol with some variation.
+
+```{r aggregate-provision}
+# Individual x session counts of "provision" behavior
+df_provision <- behavior_clean %>%
+  filter(Behavior == "provision") %>%
+  group_by(Observation.id, Subject, Nest.Entrance, Time_of_Day, log_duration,
+           molecular_sex, age, body_mass) %>%
+  summarise(n = n(), .groups = "drop")
+nrow(df_provision)
+summary(df_provision)
+```
+The provision dataset is considerably smaller, with only 22 observations after aggregation. This is expected given that food provisioning is a less frequent behavior than nest entry. The count of provisioning events per bird per session ranges from 1 to 26, with a median of 3 and a mean of 6.6. The small sample size here is an important limitation, and any models fitted to this dataset should be interpreted with caution. With only 22 observations, statistical power is low and results are likely sensitive to individual data points.
+
+
+```{r aggregate-build}
+# Individual x session total duration (seconds) of "build" behavior
+# build is a state behavior so we sum Duration..s. instead of counting events
+df_build <- behavior_clean %>%
+  filter(Behavior == "build") %>%
+  group_by(Observation.id, Subject, Nest.Entrance, Time_of_Day, log_duration,
+           molecular_sex, age, body_mass) %>%
+  summarise(build_duration = sum(Duration..s., na.rm = TRUE), .groups = "drop")
+nrow(df_build)
+summary(df_build)
+```
+
+The build dataset contains 63 observations. Build duration per bird per session ranges from 0.7 to 827.9 seconds, with a median of 52.6 seconds and a mean of 125.5 seconds. The large gap between the median and mean, combined with the wide range, suggests a strongly right-skewed distribution. This is typical for time budget data where most individuals spend relatively little time on a behavior but a few individuals contribute very long bouts. A log transformation of the response will likely be necessary before modeling. Three birds are missing body mass measurements.
+
+
