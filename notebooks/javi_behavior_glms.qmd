@@ -193,3 +193,195 @@ summary(df_build)
 The build dataset contains 63 observations. Build duration per bird per session ranges from 0.7 to 827.9 seconds, with a median of 52.6 seconds and a mean of 125.5 seconds. The large gap between the median and mean, combined with the wide range, suggests a strongly right-skewed distribution. This is typical for time budget data where most individuals spend relatively little time on a behavior but a few individuals contribute very long bouts. A log transformation of the response will likely be necessary before modeling. Three birds are missing body mass measurements.
 
 
+Before fitting any models, we examine the distribution of each response variable and check the balance of our categorical predictors. For count data like enter and provision, we expect a right-skewed distribution consistent with Poisson assumptions. For build duration we check both the raw and log-transformed distributions to confirm that a log transformation stabilizes the skew. We also tabulate the number of observations per sex and age class within each dataset, since unbalanced or sparse categories can make model estimates unreliable, particularly given the small sample sizes we are working with.
+
+```{r response-distributions}
+# Distribution of enter counts
+ggplot(df_enter, aes(x = n)) +
+  geom_histogram(binwidth = 1, fill = "steelblue") +
+  labs(title = "Enter: events per bird per session", x = "Count", y = "Frequency") +
+  theme_minimal()
+
+# Distribution of provision counts
+ggplot(df_provision, aes(x = n)) +
+  geom_histogram(binwidth = 1, fill = "steelblue") +
+  labs(title = "Provision: events per bird per session", x = "Count", y = "Frequency") +
+  theme_minimal()
+
+# Distribution of build duration (raw and log)
+ggplot(df_build, aes(x = build_duration)) +
+  geom_histogram(bins = 20, fill = "steelblue") +
+  labs(title = "Build: total duration per bird per session (raw)", x = "Seconds", y = "Frequency") +
+  theme_minimal()
+
+ggplot(df_build, aes(x = log(build_duration))) +
+  geom_histogram(bins = 20, fill = "steelblue") +
+  labs(title = "Build: total duration per bird per session (log)", x = "Log seconds", y = "Frequency") +
+  theme_minimal()
+
+# Predictor balance: sex and age counts within each dataset
+df_enter %>% count(molecular_sex)
+df_enter %>% count(age)
+
+df_provision %>% count(molecular_sex)
+df_provision %>% count(age)
+
+df_build %>% count(molecular_sex)
+df_build %>% count(age)
+```
+
+The enter dataset has reasonable balance between females (41) and males (66), with 21 observations missing sex. Age classes are represented across DCB (13), FAJ (39), and FCF (46), with 30 missing. The provision dataset is much more limited, with only 5 females and 14 males, and no DCB birds at all, making sex and age models for this behavior unreliable and likely uninterpretable. The build dataset has 19 females and 34 males with 10 missing, and age classes are reasonably distributed across DCB (8), FAJ (16), and FCF (22) with 17 missing. Based on this, sex and age models are viable for enter and build, but for provision we will limit modeling to time of day only given the small and unbalanced sample sizes. Note that DCB, FAJ, and FCF are age classification codes based on molt patterns, where DCB and FAJ broadly correspond to adult birds and FCF to first cycle, recently fledged individuals.
+
+```{r tod-balance}
+df_enter %>% count(Time_of_Day)
+df_provision %>% count(Time_of_Day)
+df_build %>% count(Time_of_Day)
+```
+
+Time of day is reasonably balanced for the enter dataset, with 53 evening and 75 morning observations. For build the split is more uneven, with only 14 evening observations compared to 49 morning, meaning estimates for the evening effect will carry more uncertainty. For provision, the imbalance is most pronounced at 6 evening and 16 morning, which further reinforces the decision to interpret any provision models cautiously. These imbalances are a direct consequence of the observation protocol and the rarity of certain behaviors during specific time windows, rather than a data quality issue.
+
+
+Adding the simplification of age to test in models also, might help with the small sample sizes. 
+
+```{r age-simplify}
+# Simplify age to two classes: Adult (DCB, FAJ) and Immature (FCF)
+df_enter <- df_enter %>%
+  mutate(age_simple = case_when(
+    age %in% c("DCB", "FAJ") ~ "Adult",
+    age == "FCF" ~ "Immature",
+    TRUE ~ NA_character_
+  ))
+
+df_build <- df_build %>%
+  mutate(age_simple = case_when(
+    age %in% c("DCB", "FAJ") ~ "Adult",
+    age == "FCF" ~ "Immature",
+    TRUE ~ NA_character_
+  ))
+```
+
+# Modeling nest entry frequency 
+
+We fit a series of Poisson GLMs to model the frequency of nest entries per bird per observation session, using log session duration as an offset to account for variation in observation effort. We start with time of day as a baseline predictor, then add sex and age separately to test whether individual attributes explain variation in entry frequency beyond time of day effects. Age is modeled both with its original three classes and with a simplified adult versus immature classification. Models are compared using AIC and residual diagnostics are performed on the best fitting model using the DHARMa package.
+
+```{r models-enter}
+# Fit all models for enter behavior
+m_enter_tod <- glm(n ~ Time_of_Day + offset(log_duration),
+                   data = df_enter,
+                   family = poisson)
+
+m_enter_sex <- glm(n ~ molecular_sex + Time_of_Day + offset(log_duration),
+                   data = df_enter %>% drop_na(molecular_sex),
+                   family = poisson)
+
+m_enter_age <- glm(n ~ age + Time_of_Day + offset(log_duration),
+                   data = df_enter %>% drop_na(age),
+                   family = poisson)
+
+m_enter_age_simple <- glm(n ~ age_simple + Time_of_Day + offset(log_duration),
+                          data = df_enter %>% drop_na(age_simple),
+                          family = poisson)
+
+# AIC comparison
+AIC(m_enter_tod, m_enter_sex, m_enter_age, m_enter_age_simple) %>%
+  arrange(AIC)
+
+# DHARMa diagnostics on the best fitting model
+# update this after checking the AIC table
+sim_enter <- simulateResiduals(m_enter_tod)
+plot(sim_enter)
+testDispersion(sim_enter)
+```
+Since models fitted on different subsets of data cannot be compared using AIC, we restrict all enter models to the subset of observations with complete data across all predictors, including sex and age. This ensures a fair comparison across models.
+
+
+```{r models-enter}
+# Complete cases only, so all models are fitted on the same observations
+df_enter_complete <- df_enter %>%
+  drop_na(molecular_sex, age, age_simple)
+
+# Fit all models on the same subset
+m_enter_tod <- glm(n ~ Time_of_Day + offset(log_duration),
+                   data = df_enter_complete,
+                   family = poisson)
+
+m_enter_sex <- glm(n ~ molecular_sex + Time_of_Day + offset(log_duration),
+                   data = df_enter_complete,
+                   family = poisson)
+
+m_enter_age <- glm(n ~ age + Time_of_Day + offset(log_duration),
+                   data = df_enter_complete,
+                   family = poisson)
+
+m_enter_age_simple <- glm(n ~ age_simple + Time_of_Day + offset(log_duration),
+                          data = df_enter_complete,
+                          family = poisson)
+
+# How many observations in the complete case dataset?
+nrow(df_enter_complete)
+
+# AIC comparison
+AIC(m_enter_tod, m_enter_sex, m_enter_age, m_enter_age_simple) %>%
+  arrange(AIC)
+```
+The AIC table tells us `m_enter_age` with the full three-level age classification is the best fitting model, with an AIC of 558.5, which is notably lower than the simplified age model (574.8), the sex model (578.1), and the time of day only baseline (578.7). The simplified age model and sex model perform similarly to each other and barely improve on the baseline. Now let's run the DHARMa diagnostics on m_enter_age and also get a summary of it:
+
+```{r enter-best-model}
+# Summary of best fitting model
+summary(m_enter_age)
+
+# DHARMa diagnostics
+sim_enter <- simulateResiduals(m_enter_age)
+plot(sim_enter)
+testDispersion(sim_enter)
+```
+That's significant overdispersion, the variance is more than 4 times what a Poisson model expects. The fix is to switch to a negative binomial distribution, which has an extra parameter to handle this. Let's refit all models with negative binomial and compare:
+
+
+
+```{r enter-negbin}
+library(MASS)
+
+# Refit all models with negative binomial to handle overdispersion
+m_enter_tod_nb <- glm.nb(n ~ Time_of_Day + offset(log_duration),
+                         data = df_enter_complete)
+
+m_enter_sex_nb <- glm.nb(n ~ molecular_sex + Time_of_Day + offset(log_duration),
+                         data = df_enter_complete)
+
+m_enter_age_nb <- glm.nb(n ~ age + Time_of_Day + offset(log_duration),
+                         data = df_enter_complete)
+
+m_enter_age_simple_nb <- glm.nb(n ~ age_simple + Time_of_Day + offset(log_duration),
+                                data = df_enter_complete)
+
+# AIC comparison
+AIC(m_enter_tod_nb, m_enter_sex_nb, m_enter_age_nb, m_enter_age_simple_nb) %>%
+  arrange(AIC)
+
+# DHARMa diagnostics on best fitting model
+sim_enter_nb <- simulateResiduals(m_enter_age_nb)
+plot(sim_enter_nb)
+testDispersion(sim_enter_nb)
+```
+
+```{r enter-model-summary}
+summary(m_enter_age_nb)
+```
+
+The best fitting model for nest entry frequency included age class and time of day as predictors, fitted with a negative binomial distribution to account for overdispersion detected in the initial Poisson models. The negative binomial fit was confirmed adequate by DHARMa diagnostics, with no significant overdispersion remaining. Both FAJ and FCF birds entered the nest significantly less frequently than DCB birds, the reference category, suggesting that older birds contribute more to nest entry behavior. Morning sessions were associated with significantly higher entry rates than evening sessions. While age class produced the lowest AIC, the margin over the time of day only model was small, around 2 AIC points, which likely reflects limited statistical power rather than a weak biological effect, given the relatively large differences in entry rates between age classes.
+
+```{r enter-interpretation}
+# Exponentiated coefficients for interpretation
+coef_enter <- coef(m_enter_age_nb)
+
+# Rate ratios relative to reference (DCB, Evening)
+exp(coef_enter["ageFAJ"])
+exp(coef_enter["ageFCF"])
+exp(coef_enter["Time_of_DayMorning"])
+``` 
+
+The reference category is DCB birds in the evening. Both FAJ and FCF birds enter the nest significantly less frequently than DCB birds, with FCF showing a slightly larger reduction than FAJ. On the count scale these coefficients are interpreted by exponentiating them, so FAJ birds enter exp(-0.55) = 0.58 times as often as DCB birds, and FCF birds enter exp(-0.61) = 0.54 times as often. Morning sessions also show significantly more entries than evening sessions, with birds entering exp(0.57) = 1.77 times more frequently in the morning.
+
+
+
