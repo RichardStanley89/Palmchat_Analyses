@@ -384,4 +384,126 @@ exp(coef_enter["Time_of_DayMorning"])
 The reference category is DCB birds in the evening. Both FAJ and FCF birds enter the nest significantly less frequently than DCB birds, with FCF showing a slightly larger reduction than FAJ. On the count scale these coefficients are interpreted by exponentiating them, so FAJ birds enter exp(-0.55) = 0.58 times as often as DCB birds, and FCF birds enter exp(-0.61) = 0.54 times as often. Morning sessions also show significantly more entries than evening sessions, with birds entering exp(0.57) = 1.77 times more frequently in the morning.
 
 
+```{r enter-full-age-model}
+# Refit best model on all observations with age data
+# This gives more precise estimates than the complete case subset
+m_enter_age_nb_full <- glm.nb(n ~ age + Time_of_Day + offset(log_duration),
+                              data = df_enter %>% drop_na(age, age_simple))
+
+summary(m_enter_age_nb_full)
+```
+Refitting the best model on all observations with age data available (n = 98) produces coefficients nearly identical to the complete case model, confirming that the results are not sensitive to the choice of dataset. The larger sample yields slightly smaller standard errors and stronger p-values for both age classes, reinforcing the conclusion that DCB birds enter the nest more frequently than FAJ and FCF birds. This full model should be considered the primary reported result for nest entry frequency, with the complete case model used only for model comparison purposes.
+
+```{r enter-rate-ratios}
+# Rate ratios from the full model (exponentiated coefficients)
+exp(coef(m_enter_age_nb_full))
+
+# With 95% confidence intervals
+exp(cbind(
+  RR = coef(m_enter_age_nb_full),
+  confint(m_enter_age_nb_full)
+))
+```
+
+```{r enter-dharma-full}
+# DHARMa diagnostics on the full model
+sim_enter_nb_full <- simulateResiduals(m_enter_age_nb_full)
+plot(sim_enter_nb_full)
+testDispersion(sim_enter_nb_full)
+```
+
+
+In the manuscript you would typically report the full model results since it uses the most data, and reference the AIC comparison briefly to justify the model structure. Something like this:
+
+Nest entry frequency was best explained by age class and time of day (negative binomial GLM). DCB birds entered the nest significantly more frequently than both FAJ (RR = 0.54, 95% CI: 0.36, 0.80, z = -3.06, p = 0.002) and FCF birds (RR = 0.52, 95% CI: 0.35, 0.77, z = -3.28, p = 0.001). Entry rates were also significantly higher during morning sessions than evening sessions (RR = 1.76, 95% CI: 1.34, 2.32, z = 4.03, p < 0.001). Model selection based on AIC supported the inclusion of age class over sex, simplified age, or time of day alone, though the margin over the time of day only model was modest (delta AIC = 2.13), suggesting limited statistical power likely due to sample size. Overdispersion in the initial Poisson models was addressed by fitting negative binomial GLMs. The full model showed adequate overall fit based on DHARMa simulation diagnostics, with no significant overdispersion detected (dispersion = 1.15, p = 0.44) and good agreement between observed and expected residuals in the QQ plot. A quantile deviation in the residuals versus predicted plot suggests the model may slightly underestimate variability at intermediate predicted values, though this deviation is minor and unlikely to meaningfully affect the conclusions.
+
+
+# Modeling build duration
+
+```{r build-complete-cases}
+# Restrict to complete cases across all predictors
+df_build_complete <- df_build %>%
+  drop_na(molecular_sex, age, age_simple)
+
+nrow(df_build_complete)
+
+# Refit all models on the same subset
+# Build duration is log-transformed as response, Gaussian family
+m_build_tod <- glm(log(build_duration) ~ Time_of_Day + offset(log_duration),
+                   data = df_build_complete)
+
+m_build_sex <- glm(log(build_duration) ~ molecular_sex + Time_of_Day + offset(log_duration),
+                   data = df_build_complete)
+
+m_build_age <- glm(log(build_duration) ~ age + Time_of_Day + offset(log_duration),
+                   data = df_build_complete)
+
+m_build_age_simple <- glm(log(build_duration) ~ age_simple + Time_of_Day + offset(log_duration),
+                          data = df_build_complete)
+
+# AIC comparison
+AIC(m_build_tod, m_build_sex, m_build_age, m_build_age_simple) %>%
+  arrange(AIC)
+```
+
+```{r build-dharma}
+# DHARMa diagnostics on best fitting model
+sim_build <- simulateResiduals(m_build_age_simple)
+plot(sim_build)
+testDispersion(sim_build)
+```
+
+```{r build-summary}
+summary(m_build_age_simple)
+```
+
+```{r build-full-model}
+# Refit best model on all observations with age_simple data
+m_build_age_simple_full <- glm(log(build_duration) ~ age_simple + Time_of_Day + offset(log_duration),
+                               data = df_build %>% drop_na(age_simple))
+
+summary(m_build_age_simple_full)
+
+# DHARMa diagnostics
+sim_build_full <- simulateResiduals(m_build_age_simple_full)
+plot(sim_build_full)
+testDispersion(sim_build_full)
+
+# Rate ratios
+exp(coef(m_build_age_simple_full))
+exp(cbind(
+  RR = coef(m_build_age_simple_full),
+  confint(m_build_age_simple_full)
+))
+```
+
+We fit a series of Gaussian GLMs to model total build duration per bird per observation session, using log-transformed build duration as the response and log session duration as an offset. Models were compared using AIC on a complete case dataset, with the simplified age model performing best (AIC = 161.09), marginally ahead of the full age class model (delta AIC = 1.52) and the time of day only baseline (delta AIC = 3.57). DHARMa diagnostics confirmed adequate model fit, with no significant overdispersion detected (dispersion = 0.96, p = 0.864).
+Refitting the best model on all observations with age data available (n = 46), immature birds spent significantly less time building than adults (RR = 0.30, 95% CI: 0.13, 0.72, t = -2.70, p = 0.010), spending roughly a third of the time on nest construction compared to adult birds. Time of day had no significant effect on building duration (RR = 1.28, 95% CI: 0.47, 3.52, t = 0.48, p = 0.634).
+
+## about time of day
+Time of day was included as a covariate in all models because observation sessions were conducted at two distinct time windows, morning and evening, which may differ systematically in overall activity levels regardless of individual bird attributes. Including time of day as a control variable ensures that the effects of sex and age are estimated after accounting for this background variation in behavioral opportunity. 
+
+# Modeling provision variable
+
+```{r provision-models}
+# Provision has only 22 observations, so we fit time of day only
+# Sex and age models are not viable given the small and unbalanced sample size
+
+m_provision_tod <- glm.nb(n ~ Time_of_Day + offset(log_duration),
+                          data = df_provision)
+
+summary(m_provision_tod)
+
+# DHARMa diagnostics
+sim_provision <- simulateResiduals(m_provision_tod)
+plot(sim_provision)
+testDispersion(sim_provision)
+
+# Rate ratios
+exp(coef(m_provision_tod))
+exp(cbind(RR = coef(m_provision_tod), confint(m_provision_tod)))
+```
+
+Given the small sample size of 22 observations and unbalanced representation of sex and age classes in the provisioning dataset, only time of day was included as a predictor. A negative binomial GLM was fitted to account for potential overdispersion, though the dispersion test confirmed no significant overdispersion (dispersion = 1.25, p = 0.432). Time of day had no significant effect on provisioning frequency (RR = 1.38, 95% CI: 0.52, 3.47, z = 0.67, p = 0.502). The erratic pattern in the DHARMa residual versus predicted plot and convergence warnings during simulation are attributable to the very small sample size rather than model misspecification, and results from this model should be interpreted with considerable caution. Collecting additional data would be necessary before drawing meaningful conclusions about predictors of this behavior.
+
 
