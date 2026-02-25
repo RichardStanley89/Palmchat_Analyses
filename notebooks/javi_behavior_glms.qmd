@@ -8,8 +8,15 @@ format:
     toc-depth: 3
     # code-fold: true
     embed-resources: true
+  # pdf:
+  #   toc: true
+  #   toc-depth: 3
+  #   keep-tex: false
 editor: source
 ---
+
+# Intro
+This document presents the statistical modeling workflow for the Palmchat behavioral video data. The goal is to fit and evaluate a series of generalized linear models examining how behavioral frequencies vary with individual attributes and group characteristics. Data were collected from video recordings at nest entrances and manually coded for individual behaviors. The analysis proceeds in two parts: first, individual-level models asking whether attributes like sex and age predict how frequently a bird performs a given behavior, and second, nest-level models asking whether group size predicts total behavioral rates at the nest entrance. Model fit is assessed throughout using AIC for model comparison and DHARMa simulation diagnostics for distributional assumptions.
 
 ```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -17,6 +24,7 @@ library(lme4)
 library(ggplot2)
 library(DHARMa)
 library(sjPlot)
+library(ggeffects)
 ```
 
 
@@ -295,7 +303,7 @@ testDispersion(sim_enter)
 Since models fitted on different subsets of data cannot be compared using AIC, we restrict all enter models to the subset of observations with complete data across all predictors, including sex and age. This ensures a fair comparison across models.
 
 
-```{r models-enter}
+```{r models-enter2}
 # Complete cases only, so all models are fitted on the same observations
 df_enter_complete <- df_enter %>%
   drop_na(molecular_sex, age, age_simple)
@@ -505,5 +513,300 @@ exp(cbind(RR = coef(m_provision_tod), confint(m_provision_tod)))
 ```
 
 Given the small sample size of 22 observations and unbalanced representation of sex and age classes in the provisioning dataset, only time of day was included as a predictor. A negative binomial GLM was fitted to account for potential overdispersion, though the dispersion test confirmed no significant overdispersion (dispersion = 1.25, p = 0.432). Time of day had no significant effect on provisioning frequency (RR = 1.38, 95% CI: 0.52, 3.47, z = 0.67, p = 0.502). The erratic pattern in the DHARMa residual versus predicted plot and convergence warnings during simulation are attributable to the very small sample size rather than model misspecification, and results from this model should be interpreted with considerable caution. Collecting additional data would be necessary before drawing meaningful conclusions about predictors of this behavior.
+
+# Effect of sex on behaviors
+
+To directly address the hypothesis that sex predicts individual investment in cooperative breeding behaviors, we fit sex-only negative binomial GLMs for enter and provision, and a sex-only Gaussian GLM for build duration. These models are fitted on the largest available dataset for each behavior, that is all observations with molecular sex data, rather than the complete case subsets used for model comparison. Time of day is excluded here to isolate the sex effect directly.
+
+```{r sex-only-models}
+# Enter: sex only
+m_enter_sex_only <- glm.nb(n ~ molecular_sex + offset(log_duration),
+                           data = df_enter %>% drop_na(molecular_sex))
+
+summary(m_enter_sex_only)
+exp(cbind(RR = coef(m_enter_sex_only), confint(m_enter_sex_only)))
+
+# Build: sex only
+m_build_sex_only <- glm(log(build_duration) ~ molecular_sex + offset(log_duration),
+                        data = df_build %>% drop_na(molecular_sex))
+
+summary(m_build_sex_only)
+exp(cbind(Multiplier = coef(m_build_sex_only), confint(m_build_sex_only)))
+
+# Provision: sex only
+m_provision_sex_only <- glm.nb(n ~ molecular_sex + offset(log_duration),
+                               data = df_provision %>% drop_na(molecular_sex))
+
+summary(m_provision_sex_only)
+exp(cbind(RR = coef(m_provision_sex_only), confint(m_provision_sex_only)))
+```
+
+```{r sex-only-dharma}
+# DHARMa diagnostics for enter sex-only model
+sim_enter_sex <- simulateResiduals(m_enter_sex_only)
+plot(sim_enter_sex)
+testDispersion(sim_enter_sex)
+
+# DHARMa diagnostics for build sex-only model
+sim_build_sex <- simulateResiduals(m_build_sex_only)
+plot(sim_build_sex)
+testDispersion(sim_build_sex)
+
+# DHARMa diagnostics for provision sex-only model
+sim_provision_sex <- simulateResiduals(m_provision_sex_only)
+plot(sim_provision_sex)
+testDispersion(sim_provision_sex)
+```
+
+Across all three behaviors, males showed higher rates than females, though the strength of statistical evidence varied. DHARMa diagnostics confirmed adequate model fit for all three sex-only models, with no significant overdispersion detected for build (dispersion = 0.98, p = 0.960) or provision (dispersion = 0.99, p = 0.680). The enter model showed borderline dispersion (dispersion = 1.42, p = 0.096), consistent with the pattern observed in earlier enter models and likely reflecting residual heterogeneity in entry rates across individuals (it is not significant, so we don't need to do anything about it, but it is consistently showing up across the enter models which suggests there is genuine individual variation in entry rates that our predictors are not fully explaining).
+
+For nest entry, males entered significantly more frequently than females (RR = 1.36, 95% CI: 1.02, 1.82, z = 2.07, p = 0.039), representing the clearest sex effect detected. For provisioning, males showed a larger magnitude effect, provisioning at 2.65 times the rate of females (RR = 2.65, 95% CI: 0.89, 7.49, z = 1.82, p = 0.069), but this fell just short of conventional significance thresholds, almost certainly due to the very small sample size of 19 observations with sex data. For nest building duration, sex had no detectable effect, with males spending only marginally more time building than females (multiplier = 1.48, 95% CI: 0.63, 3.47, t = 0.91, p = 0.367).
+The consistent direction of the sex effect across all three behaviors, with males showing higher investment in every case, suggests a biologically meaningful pattern that the current sample size is underpowered to detect reliably.
+
+
+# Nest level models 
+
+So far we have modeled behavior at the individual level, asking whether attributes like sex and age predict how often a bird performs a given behavior. Here we shift to the nest entrance level, aggregating behavioral counts across all individuals at a given nest entrance per session, including unbanded birds. The primary predictor of interest is group size, defined as the number of distinct individuals observed at a nest entrance during a session.
+
+```{r nest-level-check}
+# How many unique nest entrances in the unbanded dataset?
+n_distinct(behavior_unbanded$Nest.Entrance)
+
+# How many unique observation sessions?
+n_distinct(behavior_unbanded$Observation.id)
+```
+
+```{r nest-level-balance}
+# How many sessions per nest entrance?
+behavior_unbanded %>%
+  group_by(Nest.Entrance) %>%
+  summarise(n_sessions = n_distinct(Observation.id)) %>%
+  arrange(desc(n_sessions))
+
+# Apply the same wrong-nest filter as before
+behavior_unbanded_clean <- behavior_unbanded %>%
+  anti_join(wrong_nest, by = c("Nest.Entrance", "Subject")) %>%
+  mutate(log_duration = log(Duration))
+
+nrow(behavior_unbanded_clean)
+```
+
+
+```{r nest-level-filter}
+# Remove undersampled nest entrances with only one session
+undersampled <- c("BigNest_A", "BigNest_B", "BigNest_C", 
+                  "BigNest_E", "Guayaba_E", "Guayaba_SE")
+
+behavior_unbanded_clean <- behavior_unbanded_clean %>%
+  filter(!Nest.Entrance %in% undersampled)
+
+# How many sessions and entrances remain?
+n_distinct(behavior_unbanded_clean$Nest.Entrance)
+n_distinct(behavior_unbanded_clean$Observation.id)
+```
+
+Before aggregating, we checked the number of observation sessions per nest entrance and removed six entrances with only a single session, as these would contribute unreliable estimates to the models. This left 13 nest entrances and 58 observation sessions for analysis.
+
+```{r nest-level-aggregate}
+# Count group size per nest entrance per session
+# using all individuals including unbanded
+group_size <- behavior_unbanded_clean %>%
+  group_by(Nest.Entrance, Observation.id) %>%
+  summarise(group_size = n_distinct(Subject), .groups = "drop")
+
+# Aggregate enter counts at the nest level
+nest_enter <- behavior_unbanded_clean %>%
+  filter(Behavior == "enter") %>%
+  group_by(Nest.Entrance, Observation.id, Duration, log_duration, Time_of_Day) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  left_join(group_size, by = c("Nest.Entrance", "Observation.id"))
+
+# Aggregate provision counts at the nest level
+nest_provision <- behavior_unbanded_clean %>%
+  filter(Behavior == "provision") %>%
+  group_by(Nest.Entrance, Observation.id, Duration, log_duration, Time_of_Day) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  left_join(group_size, by = c("Nest.Entrance", "Observation.id"))
+
+# Quick overview
+nrow(nest_enter)
+summary(nest_enter$n)
+summary(nest_enter$group_size)
+
+nrow(nest_provision)
+summary(nest_provision$n)
+summary(nest_provision$group_size)
+```
+
+The nest-level enter dataset contains 57 observations across 13 nest entrances, with group sizes ranging from 1 to 6 individuals and a median of 3. Total entry counts per session range from 1 to 60 with a mean of 16.5, reflecting the expected right skew of count data. The nest-level provision dataset is considerably smaller at 15 observations, with group sizes ranging from 2 to 5. As with the individual-level provision models, results from the nest-level provision models should be interpreted with caution given the limited sample size.
+
+
+```{r nest-level-models}
+# Nest-level enter models
+m_nest_enter_tod <- glm.nb(n ~ Time_of_Day + offset(log_duration),
+                           data = nest_enter)
+
+m_nest_enter_group <- glm.nb(n ~ group_size + offset(log_duration),
+                             data = nest_enter)
+
+m_nest_enter_full <- glm.nb(n ~ group_size + Time_of_Day + offset(log_duration),
+                            data = nest_enter)
+
+# AIC comparison
+AIC(m_nest_enter_tod, m_nest_enter_group, m_nest_enter_full) %>%
+  arrange(AIC)
+
+# Nest-level provision models
+m_nest_provision_tod <- glm.nb(n ~ Time_of_Day + offset(log_duration),
+                               data = nest_provision)
+
+m_nest_provision_group <- glm.nb(n ~ group_size + offset(log_duration),
+                                 data = nest_provision)
+
+m_nest_provision_full <- glm.nb(n ~ group_size + Time_of_Day + offset(log_duration),
+                                data = nest_provision)
+
+# AIC comparison
+AIC(m_nest_provision_tod, m_nest_provision_group, m_nest_provision_full) %>%
+  arrange(AIC)
+```
+
+Given the small AIC differences between models, AIC alone is insufficient to select a single best model. Differences of less than 2 AIC points are generally considered negligible, meaning the data do not strongly discriminate between competing model structures. We therefore run DHARMa diagnostics on all models to assess which ones meet distributional assumptions, using model fit as an additional criterion alongside AIC to guide model selection.
+
+```{r nest-level-dharma-all}
+# DHARMa on all enter models
+sim_nest_enter_tod <- simulateResiduals(m_nest_enter_tod)
+sim_nest_enter_group <- simulateResiduals(m_nest_enter_group)
+sim_nest_enter_full <- simulateResiduals(m_nest_enter_full)
+
+testDispersion(sim_nest_enter_tod)
+testDispersion(sim_nest_enter_group)
+testDispersion(sim_nest_enter_full)
+
+plot(sim_nest_enter_tod)
+plot(sim_nest_enter_group)
+plot(sim_nest_enter_full)
+
+# DHARMa on all provision models
+sim_nest_provision_tod <- simulateResiduals(m_nest_provision_tod)
+sim_nest_provision_group <- simulateResiduals(m_nest_provision_group)
+sim_nest_provision_full <- simulateResiduals(m_nest_provision_full)
+
+testDispersion(sim_nest_provision_tod)
+testDispersion(sim_nest_provision_group)
+testDispersion(sim_nest_provision_full)
+
+plot(sim_nest_provision_tod)
+plot(sim_nest_provision_group)
+plot(sim_nest_provision_full)
+```
+
+
+All six models showed adequate fit based on DHARMa diagnostics, with dispersion values close to 1 and no significant deviations detected in any model. Since DHARMa cannot discriminate between models here, model selection relies on AIC differences and parsimony. For nest entry, the full model including both group size and time of day is retained, having the lowest AIC (399.08) and clean dispersion (1.008, p = 0.840). For provisioning, the group size only model is selected, with the lowest AIC (106.29) and clean dispersion (0.994, p = 0.696), and adding time of day is not justified given the small sample size of 15 observations.
+
+```{r nest-level-summaries}
+# Selected model summaries
+summary(m_nest_enter_full)
+summary(m_nest_provision_group)
+
+# Rate ratios with confidence intervals
+exp(cbind(RR = coef(m_nest_enter_full), confint(m_nest_enter_full)))
+exp(cbind(RR = coef(m_nest_provision_group), confint(m_nest_provision_group)))
+```
+
+Interesting results. For enter, group size is marginally non-significant (p = 0.086) with a positive effect, each additional bird in the group is associated with 1.13 times more entries, but the confidence interval crosses 1 (0.99, 1.29), so we cannot rule out no effect. Time of day is clearly significant, with morning sessions showing 1.58 times more entries than evening. For provision, group size has no detectable effect at all (RR = 0.82, 95% CI: 0.55, 1.25, z = -0.96, p = 0.336), and the direction is actually negative, though with wide confidence intervals this is not meaningful.
+
+You would report this something like:
+For nest entry, group size showed a marginal positive effect on total entry frequency (RR = 1.13, 95% CI: 0.99, 1.29, z = 1.72, p = 0.086), suggesting that larger groups may enter the nest more frequently in total, though this effect did not reach conventional significance thresholds and the confidence interval includes 1. Time of day was a stronger and clearly significant predictor, with morning sessions associated with 1.58 times more entries than evening sessions (RR = 1.58, 95% CI: 1.18, 2.12, z = 3.05, p = 0.002). For provisioning, group size had no detectable effect on total provisioning frequency (RR = 0.82, 95% CI: 0.55, 1.25, z = -0.96, p = 0.336), though the small sample size of 15 observations means this result has very limited statistical power.
+
+
+# Visuals
+
+
+```{r plot-enter-age}
+pred_enter_age <- ggpredict(m_enter_age_nb_full, terms = "age")
+
+# Set logical order for age classes
+df_enter <- df_enter %>%
+  mutate(age = factor(age, levels = c("DCB", "FAJ", "FCF")))
+
+pred_enter_age_df <- as.data.frame(pred_enter_age) %>%
+  mutate(x = factor(x, levels = c("DCB", "FAJ", "FCF")))
+
+ggplot() +
+  geom_boxplot(data = df_enter %>% drop_na(age),
+               aes(x = age, y = n),
+               fill = "lightblue", alpha = 0.5, outlier.shape = NA) +
+  geom_jitter(data = df_enter %>% drop_na(age),
+              aes(x = age, y = n),
+              width = 0.1, alpha = 0.3, color = "steelblue") +
+  geom_pointrange(data = pred_enter_age_df,
+                  aes(x = x, y = predicted, ymin = conf.low, ymax = conf.high),
+                  color = "darkred", size = 0.8) +
+  coord_cartesian(ylim = c(0, 30)) +
+  labs(title = "Nest entry frequency by age class",
+       x = "Age class",
+       y = "Entries per session") +
+  theme_minimal()
+```
+
+
+```{r plot-build-age}
+pred_build_age <- ggpredict(m_build_age_simple_full, terms = "age_simple")
+
+# Set logical order for age classes
+df_build <- df_build %>%
+  mutate(age_simple = factor(age_simple, levels = c("Adult", "Immature")))
+
+pred_build_age_df <- as.data.frame(pred_build_age) %>%
+  mutate(x = factor(x, levels = c("Adult", "Immature")))
+
+ggplot() +
+  geom_boxplot(data = df_build %>% drop_na(age_simple),
+               aes(x = age_simple, y = log(build_duration)),
+               fill = "lightblue", alpha = 0.5, outlier.shape = NA) +
+  geom_jitter(data = df_build %>% drop_na(age_simple),
+              aes(x = age_simple, y = log(build_duration)),
+              width = 0.1, alpha = 0.3, color = "steelblue") +
+  geom_pointrange(data = pred_build_age_df,
+                  aes(x = x, 
+                      y = log(predicted), 
+                      ymin = log(conf.low), 
+                      ymax = log(conf.high)),
+                  color = "darkred", size = 0.8) +
+  labs(title = "Build duration by age class",
+       x = "Age class",
+       y = "Log build duration (seconds)") +
+  theme_minimal()
+```
+
+
+```{r plot-nest-group-size}
+pred_nest_enter <- ggpredict(m_nest_enter_full, terms = "group_size")
+pred_nest_enter_df <- as.data.frame(pred_nest_enter)
+
+ggplot() +
+  geom_jitter(data = nest_enter,
+              aes(x = group_size, y = n),
+              width = 0.1, alpha = 0.3, color = "steelblue") +
+  geom_ribbon(data = pred_nest_enter_df,
+              aes(x = x, ymin = conf.low, ymax = conf.high),
+              alpha = 0.2, fill = "darkred") +
+  geom_line(data = pred_nest_enter_df,
+            aes(x = x, y = predicted),
+            color = "darkred", size = 1) +
+  labs(title = "Total nest entries by group size",
+       x = "Group size",
+       y = "Total entries per session") +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+
 
 
